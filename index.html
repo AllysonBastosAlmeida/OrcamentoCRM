@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/OrcamentoCRM/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CRM Orçamentos</title>
+    <script>
+      (function restoreRoute() {
+        const storedPath = sessionStorage.getItem('redirect-path');
+        if (storedPath) {
+          sessionStorage.removeItem('redirect-path');
+          const target = storedPath.startsWith('/') ? storedPath : `/${storedPath}`;
+          const base = '/OrcamentoCRM';
+          const normalized = target.startsWith(base) ? target : `${base}${target}`;
+          window.history.replaceState({}, '', normalized);
+        }
+      })();
+    </script>
+    <script type="module" crossorigin src="/OrcamentoCRM/assets/index-_EEfqueS.js"></script>
+    <link rel="stylesheet" crossorigin href="/OrcamentoCRM/assets/index-C-dpyeb1.css">
+  </head>
+  <body class="bg-background">
+    <div id="root"></div>
+  </body>
+</html>

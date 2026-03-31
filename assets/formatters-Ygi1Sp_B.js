@@ -1,0 +1,1 @@
+const t=(e=0)=>Number(e||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"}),a=e=>e?new Date(e).toLocaleDateString("pt-BR"):"--",n=e=>{const r=e?.toLowerCase();return r==="aprovado"?"badge-success":r==="enviado"?"badge-info":r==="rascunho"?"badge-warning":r==="perdido"?"badge bg-rose-500/20 text-rose-200":"badge bg-slate-500/20 text-slate-200"};export{a,t as f,n as s};
