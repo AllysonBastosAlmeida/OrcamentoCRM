@@ -104,33 +104,72 @@ const colLetter = (n) => {
   return s;
 };
 
-const mapRowToClient = (headers, row) => {
+const mapRowToClient = (headers, row, rowIndex, headerIndex = 0) => {
   const entry = {};
   headers.forEach((h, idx) => {
     const key = normalizeKey(h);
+    if (!key) return;
     entry[key] = row[idx];
   });
 
-  const company = entry.empresa || entry.nome || entry.cliente || '';
-  const responsavel = entry.responsavel || entry.nome || entry.cliente || entry.contato || entry.resp || '';
+  const pick = (...keys) => {
+    for (const key of keys) {
+      const value = entry[key];
+      if (value !== undefined && value !== null && value !== '') return value;
+    }
+    return '';
+  };
+
+  const company = pick(
+    'empresa',
+    'empresa/cliente',
+    'razao social',
+    'razao',
+    'nome fantasia',
+    'fantasia',
+    'cliente',
+    'nome',
+  );
+  const responsavel = pick(
+    'responsavel',
+    'responsavel',
+    'contato',
+    'contato principal',
+    'resp',
+    'responsavel do cliente',
+    'nome',
+    'cliente',
+  );
+  const name = pick('nome', 'cliente', 'razao', 'razao social') || responsavel || 'Cliente';
+  const idValue = pick('id', 'codigo', 'cod', 'cliente id', 'id cliente');
+  const rowId = headerIndex + 2 + rowIndex;
+  const id = idValue ? idValue.toString() : `row-${rowId}`;
 
   return {
-    id: entry.id || entry.codigo || company || crypto.randomUUID(),
-    name: entry.nome || entry.cliente || entry.razao || responsavel || 'Clientes',
+    id,
+    name,
     responsavel,
-    email: entry.email || entry['e-mail'] || entry.contato || '',
-    phone: parsePhone(entry.telefone || entry['telefone contato'] || entry.fone || entry.celular || entry.contato),
+    email: pick('email', 'e-mail', 'email contato', 'contato email', 'contato'),
+    phone: parsePhone(pick('telefone', 'telefone contato', 'fone', 'celular', 'contato telefone', 'contato')),
     company,
-    endereco: entry.endereco || '',
-    local: entry.local || entry.loc || '',
-    notes: entry.observacao || entry.obs || '',
+    endereco: pick('endereco', 'endereço'),
+    local: pick('local', 'loc'),
+    notes: pick('observacao', 'observacao', 'obs', 'observações'),
   };
 };
 
 const findHeaderRow = (rows) => {
   for (let i = 0; i < rows.length; i += 1) {
     const normalized = rows[i].map((cell) => normalizeKey(cell));
-    const hasName = normalized.some((c) => c?.includes('nome') || c === 'cliente' || c === 'empresa');
+    const hasName = normalized.some(
+      (c) =>
+        c?.includes('nome') ||
+        c?.includes('cliente') ||
+        c?.includes('empresa') ||
+        c?.includes('razao') ||
+        c?.includes('responsavel') ||
+        c?.includes('contato'),
+    );
     if (hasName) return { headers: rows[i], dataRows: rows.slice(i + 1), index: i };
   }
   return { headers: rows[0] || [], dataRows: rows.slice(1), index: 0 };
@@ -167,7 +206,9 @@ const fetchClientsFromGraph = async () => {
   const { headers, dataRows, index } = findHeaderRow(rows);
   console.info('[clientes] Cabecalho detectado', { sheet: sheetName, headerRow: index + 1, headers });
 
-  const clients = dataRows.filter((row) => row.some(Boolean)).map((row) => mapRowToClient(headers, row));
+  const clients = dataRows
+    .filter((row) => row.some((cell) => cell !== undefined && cell !== null && cell !== ''))
+    .map((row, idx) => mapRowToClient(headers, row, idx, index));
   console.info('[clientes] Total carregado da planilha', { count: clients.length, sheet: sheetName });
   console.table(
     clients.map((c, idx) => ({

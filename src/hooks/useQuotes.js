@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { createQuote, deleteQuote, duplicateQuote, getQuotes, updateQuote } from '../services/quotes.js';
+import { createQuote, deleteQuote, duplicateQuote, getQuotes, updateQuote, updateQuoteApproval } from '../services/quotes.js';
 import { fetchQuoteHistory, hasQuoteSheetConfig } from '../services/quoteSheet.js';
 
 const toNumber = (val) => {
@@ -30,51 +30,105 @@ const toNumber = (val) => {
 
 export const useQuotes = () => {
   const [quotes, setQuotes] = useState([]);
+  const [syncInfo, setSyncInfo] = useState({ status: 'idle', lastSync: null, error: null });
 
   const buildKey = (quote) => (quote?.poNumber ? `po-${quote.poNumber}` : quote?.id || crypto.randomUUID());
+  const preferNonEmpty = (localValue, remoteValue) => {
+    if (Array.isArray(localValue)) return localValue.length ? localValue : remoteValue;
+    if (typeof localValue === 'string') return localValue.trim().length ? localValue : remoteValue;
+    if (localValue === undefined || localValue === null) return remoteValue;
+    return localValue;
+  };
 
-  const mergeQuote = (remote, local) => ({
-    ...remote,
-    ...local,
-    poNumber: local.poNumber || remote.poNumber,
-    status: remote.status || local.status,
-    approvalStatus: remote.approvalStatus || local.approvalStatus,
-    category: remote.category || local.category,
-    responsible: remote.responsible || local.responsible,
-    total: remote.total ?? local.total,
-    subtotal: remote.subtotal ?? local.subtotal,
-    totalNumber: remote.totalNumber ?? local.totalNumber,
-    createdAt: remote.createdAt || local.createdAt,
-    validUntil: remote.validUntil || local.validUntil,
-  });
+  const mergeQuote = (remote, local) => {
+    const merged = { ...remote, ...local };
+    return {
+      ...merged,
+      poNumber: local?.poNumber || remote?.poNumber,
+      status: remote?.status || local?.status,
+      approvalStatus: remote?.approvalStatus || local?.approvalStatus,
+      category: remote?.category || local?.category,
+      responsible: remote?.responsible || local?.responsible,
+      total: remote?.total ?? local?.total,
+      subtotal: remote?.subtotal ?? local?.subtotal,
+      totalNumber: remote?.totalNumber ?? local?.totalNumber,
+      createdAt: remote?.createdAt || local?.createdAt,
+      validUntil: remote?.validUntil || local?.validUntil,
+      items: preferNonEmpty(local?.items, remote?.items) || [],
+      clientId: preferNonEmpty(local?.clientId, remote?.clientId) || '',
+      clientName: preferNonEmpty(local?.clientName, remote?.clientName) || '',
+      clientCompany: preferNonEmpty(local?.clientCompany, remote?.clientCompany) || '',
+      createdBy: preferNonEmpty(local?.createdBy, remote?.createdBy) || '',
+      createdByEmail: preferNonEmpty(local?.createdByEmail, remote?.createdByEmail) || '',
+      updatedBy: preferNonEmpty(local?.updatedBy, remote?.updatedBy) || '',
+      updatedByEmail: preferNonEmpty(local?.updatedByEmail, remote?.updatedByEmail) || '',
+      updatedAt: preferNonEmpty(local?.updatedAt, remote?.updatedAt) || '',
+      source: remote?.source || local?.source || 'local',
+      notes: preferNonEmpty(local?.notes, remote?.notes) || '',
+      scope: preferNonEmpty(local?.scope, remote?.scope) || '',
+      clientEmail: preferNonEmpty(local?.clientEmail, remote?.clientEmail) || '',
+      clientPhone: preferNonEmpty(local?.clientPhone, remote?.clientPhone) || '',
+      contactName: preferNonEmpty(local?.contactName, remote?.contactName) || '',
+      contactPhone: preferNonEmpty(local?.contactPhone, remote?.contactPhone) || '',
+      contactEmail: preferNonEmpty(local?.contactEmail, remote?.contactEmail) || '',
+      deliveryTime: preferNonEmpty(local?.deliveryTime, remote?.deliveryTime) || '',
+      paymentTerms: preferNonEmpty(local?.paymentTerms, remote?.paymentTerms) || '',
+      discountValue: local?.discountValue ?? remote?.discountValue ?? 0,
+      taxRate: local?.taxRate ?? remote?.taxRate ?? 0,
+    };
+  };
 
   const loadQuotes = async () => {
-    const local = getQuotes();
+    const local = (getQuotes() || []).map((q) => ({ ...q, source: q?.source || 'local' }));
     let merged = local;
+    if (hasQuoteSheetConfig) {
+      setSyncInfo((prev) => ({ ...prev, status: 'loading', error: null }));
+    } else {
+      setSyncInfo((prev) => ({ ...prev, status: 'local', error: null }));
+    }
 
     if (hasQuoteSheetConfig) {
       try {
         const history = await fetchQuoteHistory();
         const mapped = history.map((h, idx) => {
-          const totalNumber = toNumber(h.totalNumber ?? h.total);
+          const details = h.details || {};
+          const sheetApproval = h.approval || '';
+          const totalNumber = toNumber(details.total ?? details.subtotal ?? h.totalNumber ?? h.total);
           return {
-            id: `po-${h.poNumber || idx}-${h.clientName || ''}`,
-            poNumber: h.poNumber,
-            clientId: h.clientId || '',
-            clientName: h.clientName || '',
-            clientCompany: h.clientName || '',
-            title: h.title || '',
-            status: h.status || h.condition || 'Enviado',
-            createdAt: h.date || '',
-            validUntil: h.date || '',
-            subtotal: totalNumber,
-            total: totalNumber,
-            items: [],
-            notes: h.notes || '',
-            approvalStatus: h.approval || '',
-            category: h.category || '',
-            responsible: h.responsible || '',
-            totalRaw: h.total || '',
+            id: details.id || `po-${h.poNumber || idx}-${h.clientName || ''}`,
+            poNumber: details.poNumber || h.poNumber,
+            clientId: details.clientId || h.clientId || '',
+            clientName: details.clientName || h.clientName || '',
+            clientCompany: details.clientCompany || h.clientName || '',
+            clientEmail: details.clientEmail || '',
+            clientPhone: details.clientPhone || '',
+            contactName: details.contactName || '',
+            contactPhone: details.contactPhone || '',
+            contactEmail: details.contactEmail || '',
+            title: details.title || h.title || '',
+            status: details.status || h.status || h.condition || 'Enviado',
+            createdAt: details.createdAt || h.date || '',
+            validUntil: details.validUntil || h.date || '',
+            createdBy: details.createdBy || '',
+            createdByEmail: details.createdByEmail || '',
+            updatedBy: details.updatedBy || '',
+            updatedByEmail: details.updatedByEmail || '',
+            updatedAt: details.updatedAt || '',
+            subtotal: details.subtotal ?? totalNumber,
+            total: details.total ?? totalNumber,
+            totalNumber: details.totalNumber ?? totalNumber,
+            items: Array.isArray(details.items) ? details.items : [],
+            notes: details.notes || h.notes || '',
+            approvalStatus: sheetApproval || details.approvalStatus || '',
+            category: details.category || h.category || '',
+            responsible: details.responsible || h.responsible || '',
+            deliveryTime: details.deliveryTime || '',
+            paymentTerms: details.paymentTerms || '',
+            discountValue: details.discountValue ?? 0,
+            taxRate: details.taxRate ?? 0,
+            scope: details.scope || '',
+            source: details.source || 'sheet',
+            totalRaw: details.totalRaw || h.total || '',
           };
         });
         // Mescla mantendo locais criados (prioridade local)
@@ -86,8 +140,10 @@ export const useQuotes = () => {
           byKey.set(key, existing ? mergeQuote(existing, q) : q);
         });
         merged = Array.from(byKey.values());
+        setSyncInfo({ status: 'success', lastSync: new Date().toISOString(), error: null });
       } catch (error) {
         console.warn('[useQuotes] Falha ao carregar historico da planilha', error);
+        setSyncInfo((prev) => ({ ...prev, status: 'error', error: 'Falha ao atualizar a planilha.' }));
       }
     }
 
@@ -105,8 +161,16 @@ export const useQuotes = () => {
     return created;
   };
 
-  const editQuote = async (id, updates) => {
-    const updated = await updateQuote(id, updates);
+  const editQuote = async (quoteOrId, updates) => {
+    const baseQuote = typeof quoteOrId === 'object' && quoteOrId ? quoteOrId : null;
+    const id = baseQuote ? baseQuote.id : quoteOrId;
+    const updated = await updateQuote(id, updates, baseQuote);
+    setQuotes(getQuotes());
+    return updated;
+  };
+
+  const editApproval = async (quoteOrId, approvalStatus) => {
+    const updated = await updateQuoteApproval(quoteOrId, approvalStatus);
     setQuotes(getQuotes());
     return updated;
   };
@@ -117,10 +181,19 @@ export const useQuotes = () => {
     return clone;
   };
 
-  const removeQuote = async (id) => {
-    await deleteQuote(id);
+  const removeQuote = async (quoteOrId) => {
+    const baseQuote = typeof quoteOrId === 'object' && quoteOrId ? quoteOrId : null;
+    const id = baseQuote ? baseQuote.id : quoteOrId;
+    const poNumber = baseQuote ? baseQuote.poNumber : undefined;
+    setQuotes((prev) =>
+      prev.filter(
+        (q) =>
+          q.id !== id && (!poNumber || q.poNumber?.toString() !== poNumber.toString()),
+      ),
+    );
+    await deleteQuote(id, poNumber);
     await loadQuotes();
   };
 
-  return { quotes, addQuote, editQuote, cloneQuote, removeQuote, refreshQuotes: loadQuotes };
+  return { quotes, syncInfo, addQuote, editQuote, editApproval, cloneQuote, removeQuote, refreshQuotes: loadQuotes };
 };

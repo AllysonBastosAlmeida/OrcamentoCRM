@@ -1,8 +1,32 @@
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
-import { PDFDocument } from 'pdf-lib';
-import * as XLSX from 'xlsx';
 import { formatCurrency, formatDate } from './formatters.js';
+
+let xlsxPromise;
+let pdfDepsPromise;
+
+const loadXlsx = async () => {
+  if (!xlsxPromise) {
+    xlsxPromise = import('xlsx');
+  }
+  return xlsxPromise;
+};
+
+const loadPdfDeps = async () => {
+  if (!pdfDepsPromise) {
+    pdfDepsPromise = Promise.all([
+      import('jspdf'),
+      import('jspdf-autotable'),
+      import('pdf-lib'),
+    ]).then(([jspdfModule, autoTableModule, pdfLibModule]) => ({
+      jsPDF: jspdfModule.default,
+      autoTable: autoTableModule.default,
+      PDFDocument: pdfLibModule.PDFDocument,
+      StandardFonts: pdfLibModule.StandardFonts,
+      degrees: pdfLibModule.degrees,
+      rgb: pdfLibModule.rgb,
+    }));
+  }
+  return pdfDepsPromise;
+};
 
 const downloadBlob = (blob, filename) => {
   const url = URL.createObjectURL(blob);
@@ -13,10 +37,36 @@ const downloadBlob = (blob, filename) => {
   URL.revokeObjectURL(url);
 };
 
+const toNumber = (value) => {
+  if (typeof value === 'number') return value;
+  if (!value) return 0;
+  const str = value.toString();
+  const cleaned = str.replace(/[^0-9,.\-]/g, '');
+  if (!cleaned) return 0;
+  if (cleaned.includes('.') && cleaned.includes(',')) {
+    const normalized = cleaned.replace(/\./g, '').replace(',', '.');
+    const num = Number(normalized);
+    return Number.isNaN(num) ? 0 : num;
+  }
+  const lastDot = cleaned.lastIndexOf('.');
+  const lastComma = cleaned.lastIndexOf(',');
+  let decimalSep = -1;
+  if (lastDot > lastComma) decimalSep = lastDot;
+  if (lastComma > lastDot) decimalSep = lastComma;
+  if (decimalSep === -1) {
+    const num = Number(cleaned.replace(/[.,]/g, ''));
+    return Number.isNaN(num) ? 0 : num;
+  }
+  const intPart = cleaned.slice(0, decimalSep).replace(/[.,]/g, '');
+  const decPart = cleaned.slice(decimalSep + 1);
+  const num = Number(`${intPart}.${decPart}`);
+  return Number.isNaN(num) ? 0 : num;
+};
+
 export const exportQuotesToCSV = (quotes) => {
   const headers = ['Cliente', 'Título', 'Valor', 'Status', 'Validade', 'Criado em'];
   const rows = quotes.map((quote) => [
-    quote.clientName,
+    quote.clientCompany || quote.clientName,
     quote.title,
     quote.total,
     quote.status,
@@ -28,9 +78,10 @@ export const exportQuotesToCSV = (quotes) => {
   downloadBlob(blob, 'orcamentos.csv');
 };
 
-export const exportQuotesToExcel = (quotes) => {
+export const exportQuotesToExcel = async (quotes) => {
+  const XLSX = await loadXlsx();
   const rows = quotes.map((quote) => ({
-    Cliente: quote.clientName,
+    Cliente: quote.clientCompany || quote.clientName,
     Título: quote.title,
     Valor: quote.total,
     Status: quote.status,
@@ -45,7 +96,9 @@ export const exportQuotesToExcel = (quotes) => {
   downloadBlob(blob, 'orcamentos.xlsx');
 };
 
-export const exportQuoteToPDF = async (quote) => {
+export const exportQuoteToPDF = async (quote, options = {}) => {
+  const { download = true } = options;
+  const { jsPDF, autoTable, PDFDocument, StandardFonts, degrees, rgb } = await loadPdfDeps();
   const doc = new jsPDF();
   const title = 'Orçamento';
   const brand = import.meta.env?.VITE_APP_TITLE || 'CRM Orçamentos';
@@ -99,10 +152,13 @@ export const exportQuoteToPDF = async (quote) => {
   const servicesTotal = (quote.items || [])
     .filter((i) => i.type === 'servicos')
     .reduce((acc, item) => acc + item.price * item.quantity, 0);
-  const subtotal = quote.subtotal ?? materialsTotal + servicesTotal;
-  const taxValue = subtotal * (Number(quote.taxRate || 0) / 100);
-  const discount = Number(quote.discountValue || 0);
-  const grandTotal = subtotal - discount + taxValue;
+  const hasItems = (quote.items || []).length > 0;
+  const subtotal = hasItems ? materialsTotal + servicesTotal : toNumber(quote.subtotal ?? quote.total ?? 0);
+  const taxRate = toNumber(quote.taxRate || 0);
+  const discount = toNumber(quote.discountValue || 0);
+  const taxValue = subtotal * (taxRate / 100);
+  const computedTotal = (subtotal - discount) * (1 + taxRate / 100);
+  const grandTotal = hasItems ? computedTotal : toNumber(quote.total ?? 0) || computedTotal;
 
   doc.setFillColor(...palette.primary);
   doc.rect(0, 0, pageWidth, 34, 'F');
@@ -113,6 +169,8 @@ export const exportQuoteToPDF = async (quote) => {
   doc.text(`Emitido em: ${today}`, pageWidth - margin, 12, { align: 'right' });
   doc.setFontSize(11);
   doc.text(`Projeto: ${quote.title || 'Documento do cliente'}`, margin, 24);
+  doc.setFontSize(10);
+  doc.text(`PO: ${quote.poNumber || '--'}`, margin, 30);
 
   if (logoData) {
     try {
@@ -135,23 +193,25 @@ export const exportQuoteToPDF = async (quote) => {
   autoTable(doc, {
     startY: cardsY + 46,
     margin: { left: margin, right: margin },
-    head: [['Item', 'Categoria', 'SKU', 'Quantidade']],
+    head: [['Item', 'Categoria', 'SKU', 'Tipo', 'Quantidade']],
     body: (quote.items || [])
       .filter((item) => !isLaborItem(item))
       .map((item) => [
         item.name || '--',
         item.type === 'materiais' ? 'Material' : item.type === 'servicos' ? 'Serviço' : '--',
         item.sku || '--',
+        item.unit || '--',
         item.quantity,
       ]),
     styles: { fontSize: 8, cellPadding: 2, valign: 'middle', halign: 'left' },
     headStyles: { fillColor: palette.primaryLight, textColor: 255, fontStyle: 'bold', fontSize: 9, halign: 'left' },
     alternateRowStyles: { fillColor: [247, 249, 252] },
     columnStyles: {
-      0: { cellWidth: contentWidth * 0.5 },
+      0: { cellWidth: contentWidth * 0.44 },
       1: { cellWidth: contentWidth * 0.2 },
-      2: { cellWidth: contentWidth * 0.15 },
-      3: { halign: 'right', cellWidth: contentWidth * 0.15 },
+      2: { cellWidth: contentWidth * 0.14 },
+      3: { cellWidth: contentWidth * 0.1 },
+      4: { halign: 'right', cellWidth: contentWidth * 0.12 },
     },
     didDrawPage: () => {
       doc.setDrawColor(...palette.border);
@@ -425,8 +485,32 @@ export const exportQuoteToPDF = async (quote) => {
 
   y += infoCardHeight + 6;
 
+  const applyWatermark = async (pdfDoc) => {
+    const text = 'Documento Confidencial';
+    const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    const fontSize = 20;
+    pdfDoc.getPages().forEach((page) => {
+      const { width } = page.getSize();
+      const textWidth = font.widthOfTextAtSize(text, fontSize);
+      const x = (width - textWidth) / 2;
+      const yPos = 16;
+      page.drawText(text, {
+        x,
+        y: yPos,
+        size: fontSize,
+        font,
+        color: rgb(0.85, 0.1, 0.1),
+        opacity: 0.22,
+        rotate: degrees(0),
+      });
+    });
+  };
+
   try {
     const pdfBytes = doc.output('arraybuffer');
+    const generatedPdf = await PDFDocument.load(pdfBytes);
+    await applyWatermark(generatedPdf);
+
     const baseUrl = (import.meta.env?.BASE_URL || '/').replace(/\/$/, '');
     const coverUrl = encodeURI(`${baseUrl}/Capa Orçamento.pdf`);
     const coverResponse = await fetch(coverUrl);
@@ -435,10 +519,7 @@ export const exportQuoteToPDF = async (quote) => {
       throw new Error(`Falha ao carregar capa (${coverResponse.status})`);
     }
 
-    const [coverBytes, generatedPdf] = await Promise.all([
-      coverResponse.arrayBuffer(),
-      PDFDocument.load(pdfBytes),
-    ]);
+    const coverBytes = await coverResponse.arrayBuffer();
 
     const mergedPdf = await PDFDocument.create();
     const coverPdf = await PDFDocument.load(coverBytes);
@@ -449,9 +530,21 @@ export const exportQuoteToPDF = async (quote) => {
     generatedPages.forEach((page) => mergedPdf.addPage(page));
 
     const mergedBytes = await mergedPdf.save();
-    downloadBlob(new Blob([mergedBytes], { type: 'application/pdf' }), filename);
+    const blob = new Blob([mergedBytes], { type: 'application/pdf' });
+    if (download) {
+      downloadBlob(blob, filename);
+    }
+    return { blob, filename };
   } catch (error) {
     console.warn('Falha ao anexar capa do PDF, salvando sem capa', error);
-    doc.save(filename);
+    const pdfBytes = doc.output('arraybuffer');
+    const generatedPdf = await PDFDocument.load(pdfBytes);
+    await applyWatermark(generatedPdf);
+    const finalBytes = await generatedPdf.save();
+    const blob = new Blob([finalBytes], { type: 'application/pdf' });
+    if (download) {
+      downloadBlob(blob, filename);
+    }
+    return { blob, filename };
   }
 };

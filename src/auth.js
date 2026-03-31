@@ -6,15 +6,24 @@ const scopes =
     'Files.Read',
     'Files.Read.All',
     'Sites.Read.All',
+    'Mail.ReadWrite',
+    'Mail.Send',
   ];
+
+const DEFAULT_ROUTER_BASENAME = '/OrcamentoCRM';
+const routerBase = import.meta.env.VITE_ROUTER_BASENAME || DEFAULT_ROUTER_BASENAME;
+const normalizedBase = routerBase.endsWith('/') ? routerBase : `${routerBase}/`;
+const fallbackRedirectUri = `${window.location.origin}${normalizedBase}`;
+const prodRedirectUri = import.meta.env.VITE_MSAL_REDIRECT_URI_PROD || fallbackRedirectUri;
+const clientId = import.meta.env.VITE_MSAL_CLIENT_ID || '';
+
+export const hasMsalConfig = Boolean(clientId);
 
 const msalConfig = {
   auth: {
-    clientId: import.meta.env.VITE_MSAL_CLIENT_ID || '',
+    clientId,
     authority: import.meta.env.VITE_MSAL_AUTHORITY || 'https://login.microsoftonline.com/common',
-    redirectUri: import.meta.env.DEV
-      ? import.meta.env.VITE_MSAL_REDIRECT_URI
-      : import.meta.env.VITE_MSAL_REDIRECT_URI_PROD,
+    redirectUri: import.meta.env.DEV ? fallbackRedirectUri : prodRedirectUri,
   },
   cache: {
     cacheLocation: import.meta.env.VITE_MSAL_CACHE_LOCATION || 'localStorage',
@@ -29,9 +38,18 @@ export const loginRequest = {
 export const msalInstance = new PublicClientApplication(msalConfig);
 
 export const getActiveAccount = () => {
-  const accounts = msalInstance.getAllAccounts();
-  if (accounts.length > 0) {
-    msalInstance.setActiveAccount(accounts[0]);
+  const currentActive = msalInstance.getActiveAccount?.() || null;
+  if (currentActive) {
+    return currentActive;
+  }
+
+  const accounts = msalInstance.getAllAccounts().filter(Boolean);
+  if (accounts.length > 0 && accounts[0]) {
+    try {
+      msalInstance.setActiveAccount(accounts[0]);
+    } catch (error) {
+      console.warn('[auth] Falha ao definir conta ativa do MSAL', error);
+    }
     return accounts[0];
   }
   return null;

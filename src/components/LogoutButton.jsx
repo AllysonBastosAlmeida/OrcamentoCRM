@@ -1,9 +1,9 @@
 import { LogOut } from 'lucide-react';
 
-const LogoutButton = ({ onLogout }) => (
-  <button className="btn-secondary" onClick={onLogout}>
+const LogoutButton = ({ onLogout, className = 'btn-secondary', labelClassName = '' }) => (
+  <button className={className} onClick={onLogout}>
     <LogOut className="h-4 w-4" />
-    Sair
+    <span className={labelClassName}>Sair</span>
   </button>
 );
 

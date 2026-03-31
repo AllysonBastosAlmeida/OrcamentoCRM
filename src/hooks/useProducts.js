@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import { getProducts, refreshProducts, graphConfig } from '../services/api.js';
+import {
+  addProductToSheet,
+  deleteProductFromSheet,
+  getProducts,
+  refreshProducts,
+  updateProductInSheet,
+  graphConfig,
+} from '../services/api.js';
 
 export const useProducts = (defaultSheet) => {
   const [products, setProducts] = useState([]);
@@ -40,6 +47,21 @@ export const useProducts = (defaultSheet) => {
     sheet,
     setSheet,
     refresh: () => fetchProducts({ forceRefresh: true }),
+    addProduct: async (payload) => {
+      const result = await addProductToSheet({ ...payload, sheet });
+      await fetchProducts({ forceRefresh: true });
+      return result;
+    },
+    updateProduct: async (payload) => {
+      const result = await updateProductInSheet({ ...payload, sheet });
+      await fetchProducts({ forceRefresh: true });
+      return result;
+    },
+    removeProduct: async (payload) => {
+      const result = await deleteProductFromSheet({ ...payload, sheet });
+      await fetchProducts({ forceRefresh: true });
+      return result;
+    },
     hasSharePointConfig: graphConfig.hasSharePointConfig,
     sheetMateriais: graphConfig.sheetMateriais,
     sheetServicos: graphConfig.sheetServicos,
