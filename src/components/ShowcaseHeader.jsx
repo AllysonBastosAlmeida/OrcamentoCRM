@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUpRight, ChevronDown, FileDown, Gem, Menu, Plus } from 'lucide-react';
+import { ChevronDown, FileDown, Menu, Plus } from 'lucide-react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { findShowcaseGroupByPath, showcaseNavGroups } from './navLinks.js';
 
@@ -44,7 +44,7 @@ const ShowcaseHeader = ({
   onCreateQuote,
   onOpenReports,
   onSelectSubsection,
-  onToggleGoldShowcase,
+  onRequestLegacyTheme,
 }) => {
   const navigate = useNavigate();
   const meta = pageMeta[currentPath] || pageMeta['/'];
@@ -54,16 +54,16 @@ const ShowcaseHeader = ({
   const navBarRef = useRef(null);
   const navCenterRef = useRef(null);
   const [navPinned, setNavPinned] = useState(false);
-  const [navScrollProgress, setNavScrollProgress] = useState(0);
   const [navShellHeight, setNavShellHeight] = useState(0);
   const [openGroupId, setOpenGroupId] = useState(null);
   const [hoveredGroupId, setHoveredGroupId] = useState(null);
   const [hoveredSubPath, setHoveredSubPath] = useState(null);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const previewGroup = showcaseNavGroups.find((group) => group.id === openGroupId) || activeGroup;
-  const operationHeroImage = showcaseNavGroups.find((group) => group.id === 'operacao')?.heroImage || 'showcase-clever-command-hero.png';
+  const operationHeroImage = showcaseNavGroups.find((group) => group.id === 'operacao')?.heroImage || 'showcase-clever-command-hero.jpg';
   const heroImage = isMobileViewport ? operationHeroImage : previewGroup?.heroImage || operationHeroImage;
   const heroImageUrl = `${normalizedBaseUrl}${heroImage}`;
+  const showHeroBrandAccent = heroImage === operationHeroImage;
   const heroTitle = meta.title.split('\n');
   const activeSubsection = activeGroup.items.find((item) => item.to === currentPath) || activeGroup.items[0];
 
@@ -89,8 +89,8 @@ const ShowcaseHeader = ({
 
     const updateNavScrollState = () => {
       const scrollY = window.scrollY || window.pageYOffset || 0;
-      setNavPinned(scrollY > 10);
-      setNavScrollProgress(Math.min(scrollY / 220, 1));
+      const nextPinned = scrollY > 10;
+      setNavPinned((currentPinned) => (currentPinned === nextPinned ? currentPinned : nextPinned));
     };
 
     const handleScroll = () => {
@@ -161,9 +161,6 @@ const ShowcaseHeader = ({
     return () => window.removeEventListener('pointerdown', handlePointerDown);
   }, [openGroupId]);
 
-  const navBackgroundAlpha = Math.min(0.94, navScrollProgress * 0.98);
-  const navBorderAlpha = Math.min(0.22, navScrollProgress * 0.24);
-  const navShadowAlpha = Math.min(0.4, navScrollProgress * 0.42);
   const openGroup = showcaseNavGroups.find((group) => group.id === openGroupId) || null;
   const handleGroupClick = (group) => {
     const firstGroupPath = group.items[0]?.to || '/';
@@ -186,14 +183,21 @@ const ShowcaseHeader = ({
         <img src={heroImageUrl} alt="" className="showcase-hero-bg-image" />
       </div>
       <div className="showcase-hero-gradient" aria-hidden="true" />
+      {showHeroBrandAccent ? (
+        <div className="showcase-hero-brand-accent" aria-hidden="true">
+          <span className="showcase-hero-brand-accent-aura" />
+          <span className="showcase-hero-brand-accent-line" />
+          <span className="showcase-hero-brand-accent-trace" />
+          <span className="showcase-hero-brand-accent-glow" />
+          <span className="showcase-hero-brand-accent-dot showcase-hero-brand-accent-dot-start" />
+          <span className="showcase-hero-brand-accent-dot showcase-hero-brand-accent-dot-end" />
+        </div>
+      ) : null}
 
       <div
         className={`showcase-nav-shell ${navPinned ? 'showcase-nav-shell-pinned' : ''}`}
         style={{
           minHeight: navShellHeight ? `${navShellHeight}px` : undefined,
-          '--showcase-nav-bg-alpha': navBackgroundAlpha.toFixed(3),
-          '--showcase-nav-border-alpha': navBorderAlpha.toFixed(3),
-          '--showcase-nav-shadow-alpha': navShadowAlpha.toFixed(3),
         }}
       >
         <div ref={navBarRef} className={`showcase-nav-bar showcase-nav-bar-landing ${navPinned ? 'showcase-nav-bar-pinned' : ''}`}>
@@ -257,20 +261,19 @@ const ShowcaseHeader = ({
             ) : null}
           </div>
 
-          <div className="showcase-nav-actions">
-            <div className="showcase-user-chip">Modo teste</div>
-            <button type="button" className="showcase-pill-btn" onClick={onToggleGoldShowcase}>
-              <Gem className="h-4 w-4" />
-              Encerrar teste
-              <ArrowUpRight className="h-4 w-4" />
-            </button>
-          </div>
+          <div className="showcase-nav-actions" />
         </div>
       </div>
 
       <div className="showcase-landing-content">
         <div className="showcase-hero-copy showcase-hero-copy-landing">
-          <p className="showcase-eyebrow">{meta.eyebrow}</p>
+          <p
+            className="showcase-eyebrow"
+            onDoubleClick={onRequestLegacyTheme}
+            title="Duplo clique para abrir o tema antigo"
+          >
+            {meta.eyebrow}
+          </p>
           <h1 className="showcase-hero-title">
             {heroTitle.map((line) => (
               <span key={line} className="showcase-hero-title-line">

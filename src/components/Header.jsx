@@ -8,9 +8,9 @@ const Header = ({
   onLogout,
   onMenuClick,
   cyberModeEnabled,
-  goldShowcaseEnabled,
+  legacyThemeEnabled,
   onToggleCyberMode,
-  onToggleGoldShowcase,
+  onReturnToDefaultTheme,
 }) => {
   const navigate = useNavigate();
   const initials = useMemo(() => {
@@ -40,15 +40,17 @@ const Header = ({
 
       <div className="header-toolbar">
         <div className="header-toolbar-group">
-          <button
-            type="button"
-            className={`toolbar-btn toolbar-btn-gold-test ${goldShowcaseEnabled ? 'toolbar-btn-gold-test-active' : ''}`}
-            onClick={onToggleGoldShowcase}
-            title={goldShowcaseEnabled ? 'Desativar tema experimental' : 'Ativar tema experimental'}
-          >
-            <Gem className="h-3.5 w-3.5" />
-            <span className="hidden 2xl:inline">Teste tema</span>
-          </button>
+          {legacyThemeEnabled ? (
+            <button
+              type="button"
+              className="toolbar-btn toolbar-btn-gold-test toolbar-btn-gold-test-active"
+              onClick={onReturnToDefaultTheme}
+              title="Voltar ao tema padrao"
+            >
+              <Gem className="h-3.5 w-3.5" />
+              <span className="hidden 2xl:inline">Tema padrao</span>
+            </button>
+          ) : null}
           <button
             type="button"
             className="toolbar-btn"

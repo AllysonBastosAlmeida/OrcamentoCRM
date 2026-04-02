@@ -1,8 +1,8 @@
 import { NavLink } from 'react-router-dom';
-import { X } from 'lucide-react';
+import { Gem, X } from 'lucide-react';
 import { navLinks } from './navLinks.js';
 
-const MobileSidebar = ({ open, onClose, currentPath, appTitle, user }) => {
+const MobileSidebar = ({ open, onClose, currentPath, appTitle, user, onReturnToDefaultTheme }) => {
   const baseUrl = import.meta.env.BASE_URL || '/';
   const normalizedBaseUrl = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
   const logoUrl = `${normalizedBaseUrl}logo.png`;
@@ -58,6 +58,18 @@ const MobileSidebar = ({ open, onClose, currentPath, appTitle, user }) => {
             );
           })}
         </nav>
+
+        <button
+          type="button"
+          className="mt-4 flex items-center justify-center gap-2 rounded-xl border border-primary/30 bg-white/5 px-3 py-2 text-xs font-semibold text-white shadow-soft transition hover:border-primary/50 hover:bg-white/10"
+          onClick={() => {
+            onReturnToDefaultTheme?.();
+            onClose();
+          }}
+        >
+          <Gem className="h-4 w-4" />
+          Tema padrao
+        </button>
       </aside>
     </div>
   );

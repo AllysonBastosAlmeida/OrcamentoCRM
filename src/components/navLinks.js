@@ -15,13 +15,13 @@ export const showcaseNavGroups = [
   {
     id: 'comercial',
     label: 'Comercial',
-    heroImage: 'showcase-orcamentos-hero.png',
+    heroImage: 'showcase-orcamentos-hero.jpg',
     items: ['/', '/orcamentos', '/clientes'].map(findLink).filter(Boolean),
   },
   {
     id: 'operacao',
     label: 'Operacao',
-    heroImage: 'showcase-clever-command-hero.png',
+    heroImage: 'showcase-clever-command-hero.jpg',
     items: ['/contatos-internos', '/produtos', '/relatorios'].map(findLink).filter(Boolean),
   },
 ];

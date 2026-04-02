@@ -142,7 +142,7 @@ const ProtectedRoute = ({ isAuthenticated, onLogin, children }) => {
 };
 
 function App() {
-  const showcasePassword = '102030';
+  const legacyThemePassword = '102030';
   const { instance, accounts, inProgress } = useMsal();
   const location = useLocation();
   const navigate = useNavigate();
@@ -154,11 +154,11 @@ function App() {
   const [signedOut, setSignedOut] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [cyberModeEnabled, setCyberModeEnabled] = useState(() => localStorage.getItem('crm-cyber-mode') === '1');
-  const [goldShowcaseEnabled, setGoldShowcaseEnabled] = useState(() => localStorage.getItem('crm-gold-showcase') === '1');
+  const [legacyThemeEnabled, setLegacyThemeEnabled] = useState(() => localStorage.getItem('crm-legacy-theme') === '1');
   const [showcaseEntryActive, setShowcaseEntryActive] = useState(false);
-  const [showcasePasswordPromptOpen, setShowcasePasswordPromptOpen] = useState(false);
-  const [showcasePasswordValue, setShowcasePasswordValue] = useState('');
-  const [showcasePasswordError, setShowcasePasswordError] = useState('');
+  const [legacyThemePromptOpen, setLegacyThemePromptOpen] = useState(false);
+  const [legacyThemePasswordValue, setLegacyThemePasswordValue] = useState('');
+  const [legacyThemePasswordError, setLegacyThemePasswordError] = useState('');
   const showcaseWasActiveRef = useRef(false);
   const showcasePasswordInputRef = useRef(null);
   const showcaseStageRef = useRef(null);
@@ -167,7 +167,7 @@ function App() {
 
   const isAuthenticated = useMemo(() => !!account, [account]);
   const shouldApplyCyberMode = cyberModeEnabled && isAuthenticated && !signedOut && !isLoggingOut && !error;
-  const showcaseActive = goldShowcaseEnabled && isAuthenticated && !signedOut && !isLoggingOut && !error;
+  const showcaseActive = isAuthenticated && !signedOut && !isLoggingOut && !error && !legacyThemeEnabled;
 
   const applyAuthenticatedUser = (active) => {
     if (!active) {
@@ -236,14 +236,15 @@ function App() {
     document.body.classList.toggle('showcase-theme-enabled', showcaseActive);
     document.body.classList.toggle('showcase-theme-entering', showcaseActive && showcaseEntryActive);
     localStorage.setItem('crm-cyber-mode', cyberModeEnabled ? '1' : '0');
-    localStorage.setItem('crm-gold-showcase', goldShowcaseEnabled ? '1' : '0');
+    localStorage.setItem('crm-legacy-theme', legacyThemeEnabled ? '1' : '0');
+    localStorage.removeItem('crm-gold-showcase');
     return () => {
       document.body.classList.remove('cyber-mode');
       document.body.classList.remove('cyber-mode-enabled');
       document.body.classList.remove('showcase-theme-enabled');
       document.body.classList.remove('showcase-theme-entering');
     };
-  }, [cyberModeEnabled, goldShowcaseEnabled, shouldApplyCyberMode, showcaseActive, showcaseEntryActive]);
+  }, [cyberModeEnabled, legacyThemeEnabled, shouldApplyCyberMode, showcaseActive, showcaseEntryActive]);
 
   useEffect(() => {
     const wasActive = showcaseWasActiveRef.current;
@@ -287,7 +288,7 @@ function App() {
   }, [location.pathname, showcaseActive]);
 
   useEffect(() => {
-    if (!showcasePasswordPromptOpen) {
+    if (!legacyThemePromptOpen) {
       return undefined;
     }
 
@@ -298,9 +299,9 @@ function App() {
 
     const handleKeydown = (event) => {
       if (event.key === 'Escape') {
-        setShowcasePasswordPromptOpen(false);
-        setShowcasePasswordValue('');
-        setShowcasePasswordError('');
+        setLegacyThemePromptOpen(false);
+        setLegacyThemePasswordValue('');
+        setLegacyThemePasswordError('');
       }
     };
 
@@ -309,7 +310,7 @@ function App() {
       window.clearTimeout(timeoutId);
       window.removeEventListener('keydown', handleKeydown);
     };
-  }, [showcasePasswordPromptOpen]);
+  }, [legacyThemePromptOpen]);
 
   useEffect(() => {
     const handleKeydown = (event) => {
@@ -335,12 +336,19 @@ function App() {
       if (event.key.toLowerCase() === 'n') {
         event.preventDefault();
         navigate('/orcamentos?new=1');
+        return;
+      }
+      if (showcaseActive && event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'l') {
+        event.preventDefault();
+        setLegacyThemePasswordValue('');
+        setLegacyThemePasswordError('');
+        setLegacyThemePromptOpen(true);
       }
     };
 
     window.addEventListener('keydown', handleKeydown);
     return () => window.removeEventListener('keydown', handleKeydown);
-  }, [navigate]);
+  }, [navigate, showcaseActive]);
 
   const handleLogin = async () => {
     try {
@@ -379,33 +387,33 @@ function App() {
     }
   };
 
-  const closeShowcasePasswordPrompt = () => {
-    setShowcasePasswordPromptOpen(false);
-    setShowcasePasswordValue('');
-    setShowcasePasswordError('');
+  const closeLegacyThemePrompt = () => {
+    setLegacyThemePromptOpen(false);
+    setLegacyThemePasswordValue('');
+    setLegacyThemePasswordError('');
   };
 
-  const handleToggleGoldShowcase = () => {
-    if (goldShowcaseEnabled) {
-      setGoldShowcaseEnabled(false);
-      return;
-    }
-
-    setShowcasePasswordValue('');
-    setShowcasePasswordError('');
-    setShowcasePasswordPromptOpen(true);
+  const handleRequestLegacyTheme = () => {
+    setLegacyThemePasswordValue('');
+    setLegacyThemePasswordError('');
+    setLegacyThemePromptOpen(true);
   };
 
-  const handleShowcasePasswordSubmit = (event) => {
+  const handleLegacyThemePasswordSubmit = (event) => {
     event.preventDefault();
 
-    if (showcasePasswordValue.trim() !== showcasePassword) {
-      setShowcasePasswordError('Senha incorreta.');
+    if (legacyThemePasswordValue.trim() !== legacyThemePassword) {
+      setLegacyThemePasswordError('Senha incorreta.');
       return;
     }
 
-    setGoldShowcaseEnabled(true);
-    closeShowcasePasswordPrompt();
+    setLegacyThemeEnabled(true);
+    closeLegacyThemePrompt();
+  };
+
+  const handleReturnToDefaultTheme = () => {
+    setLegacyThemeEnabled(false);
+    setMobileOpen(false);
   };
 
   const requestShowcaseStageScroll = () => {
@@ -507,7 +515,7 @@ function App() {
                 onCreateClient={() => navigate('/clientes?new=1')}
                 onOpenReports={() => navigate('/relatorios')}
                 onSelectSubsection={requestShowcaseStageScroll}
-                onToggleGoldShowcase={handleToggleGoldShowcase}
+                onRequestLegacyTheme={handleRequestLegacyTheme}
               />
               <main ref={showcaseStageRef} className="showcase-stage-scroll">
                 <div className="showcase-stage-shell">
@@ -524,7 +532,6 @@ function App() {
               user={user}
               onLogout={handleLogout}
               onSelectSubsection={requestShowcaseStageScroll}
-              onToggleGoldShowcase={handleToggleGoldShowcase}
             />
           </div>
         ) : (
@@ -536,9 +543,9 @@ function App() {
                 onLogout={handleLogout}
                 onMenuClick={() => setMobileOpen(true)}
                 cyberModeEnabled={cyberModeEnabled}
-                goldShowcaseEnabled={goldShowcaseEnabled}
+                legacyThemeEnabled={legacyThemeEnabled}
                 onToggleCyberMode={() => setCyberModeEnabled((prev) => !prev)}
-                onToggleGoldShowcase={handleToggleGoldShowcase}
+                onReturnToDefaultTheme={handleReturnToDefaultTheme}
               />
               <main className="scroll-container desktop-shell min-h-0 flex-1 overflow-y-auto px-3 pb-3 pt-2 sm:px-4 sm:pb-4 sm:pt-3 md:px-6 md:pb-6 md:pt-4 lg:px-8 lg:pb-8 lg:pt-4">
                 {appRoutes}
@@ -551,27 +558,28 @@ function App() {
               currentPath={location.pathname}
               appTitle={appTitle}
               user={user}
+              onReturnToDefaultTheme={handleReturnToDefaultTheme}
             />
           </div>
         )}
-        {showcasePasswordPromptOpen ? (
+        {legacyThemePromptOpen ? (
           <div className="cyber-overlay fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/78 px-4 backdrop-blur-sm">
             <button
               type="button"
               className="absolute inset-0"
-              onClick={closeShowcasePasswordPrompt}
+              onClick={closeLegacyThemePrompt}
               aria-label="Fechar solicitacao de senha"
             />
             <form
               className="cyber-dialog relative z-[1] w-full max-w-md rounded-2xl border border-white/10 bg-slate-950/95 p-5 text-white shadow-2xl sm:p-6"
-              onSubmit={handleShowcasePasswordSubmit}
+              onSubmit={handleLegacyThemePasswordSubmit}
             >
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="text-[11px] uppercase tracking-[0.28em] text-slate-400">Tema experimental</p>
-                  <h2 className="mt-2 text-xl font-semibold text-white">Digite a senha para continuar</h2>
+                  <p className="text-[11px] uppercase tracking-[0.28em] text-slate-400">Tema legado</p>
+                  <h2 className="mt-2 text-xl font-semibold text-white">Digite a senha para abrir o tema antigo</h2>
                   <p className="mt-2 text-sm leading-6 text-slate-300">
-                    Esse acesso protege o tema em desenvolvimento enquanto seguimos os testes visuais.
+                    O preto e dourado agora e o tema padrao. Essa senha libera apenas o layout antigo para manutencao eventual.
                   </p>
                 </div>
                 <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-slate-100">
@@ -586,11 +594,11 @@ function App() {
                 id="showcase-password-input"
                 ref={showcasePasswordInputRef}
                 type="password"
-                value={showcasePasswordValue}
+                value={legacyThemePasswordValue}
                 onChange={(event) => {
-                  setShowcasePasswordValue(event.target.value);
-                  if (showcasePasswordError) {
-                    setShowcasePasswordError('');
+                  setLegacyThemePasswordValue(event.target.value);
+                  if (legacyThemePasswordError) {
+                    setLegacyThemePasswordError('');
                   }
                 }}
                 className="mt-2 w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition focus:border-primary/50 focus:bg-white/[0.07]"
@@ -598,14 +606,14 @@ function App() {
                 autoComplete="current-password"
               />
 
-              {showcasePasswordError ? <p className="mt-2 text-sm text-rose-300">{showcasePasswordError}</p> : null}
+              {legacyThemePasswordError ? <p className="mt-2 text-sm text-rose-300">{legacyThemePasswordError}</p> : null}
 
               <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-                <button type="button" className="btn-secondary justify-center" onClick={closeShowcasePasswordPrompt}>
+                <button type="button" className="btn-secondary justify-center" onClick={closeLegacyThemePrompt}>
                   Cancelar
                 </button>
                 <button type="submit" className="btn-primary justify-center">
-                  Entrar no tema
+                  Abrir tema antigo
                 </button>
               </div>
             </form>

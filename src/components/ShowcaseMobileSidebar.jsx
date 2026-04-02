@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { ChevronDown, Gem, X } from 'lucide-react';
+import { ChevronDown, X } from 'lucide-react';
 import LogoutButton from './LogoutButton.jsx';
 import { findShowcaseGroupByPath, showcaseNavGroups } from './navLinks.js';
 
@@ -12,7 +12,6 @@ const ShowcaseMobileSidebar = ({
   user,
   onLogout,
   onSelectSubsection,
-  onToggleGoldShowcase,
 }) => {
   const initials = useMemo(() => {
     if (!user?.name) return 'CR';
@@ -102,17 +101,6 @@ const ShowcaseMobileSidebar = ({
         </div>
 
         <div className="showcase-mobile-actions">
-          <button
-            type="button"
-            className="showcase-pill-btn justify-center"
-            onClick={() => {
-              onToggleGoldShowcase();
-              onClose();
-            }}
-          >
-            <Gem className="h-4 w-4" />
-            Encerrar teste
-          </button>
           <LogoutButton onLogout={onLogout} className="showcase-outline-btn justify-center" />
         </div>
       </aside>
