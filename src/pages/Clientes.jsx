@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Plus, Pencil, Trash2, Users } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { useClients } from '../hooks/useClients.js';
+import ModalPortal from '../components/ModalPortal.jsx';
 import { useToast } from '../components/ToastHost.jsx';
 
 const emptyClient = {
@@ -363,7 +364,8 @@ const Clientes = () => {
       </div>
 
       {modalOpen && (
-        <div
+        <ModalPortal>
+          <div
           className="cyber-overlay fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-4"
           onMouseDown={(event) => {
             if (event.target !== event.currentTarget || loading) return;
@@ -463,11 +465,13 @@ const Clientes = () => {
               </button>
             </div>
           </div>
-        </div>
+          </div>
+        </ModalPortal>
       )}
 
       {confirmClient && (
-        <div
+        <ModalPortal>
+          <div
           className="cyber-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4"
           onMouseDown={(event) => {
             if (event.target !== event.currentTarget || deletingClient) return;
@@ -496,7 +500,8 @@ const Clientes = () => {
               </button>
             </div>
           </div>
-        </div>
+          </div>
+        </ModalPortal>
       )}
     </div>
   );

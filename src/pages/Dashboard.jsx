@@ -7,6 +7,7 @@ import {
   ChevronUp,
   Clock,
   Database,
+  Ellipsis,
   Filter,
   GripVertical,
   LayoutGrid,
@@ -253,6 +254,7 @@ const Dashboard = () => {
   const [layoutDraftSnapshot, setLayoutDraftSnapshot] = useState(null);
   const [layouts, setLayouts] = useState(() => loadLayoutsFromStorage());
   const [gridDensity, setGridDensity] = useState({ rowHeight: 56, gap: 10 });
+  const [showMobileActions, setShowMobileActions] = useState(false);
   const { width, containerRef, mounted } = useContainerWidth();
   const navigate = useNavigate();
 
@@ -277,6 +279,13 @@ const Dashboard = () => {
     return () => observer.disconnect();
   }, []);
   const activeBreakpoint = useMemo(() => getActiveBreakpoint(width || 0), [width]);
+  const isCompactMobile = activeBreakpoint === 'xs' || activeBreakpoint === 'xxs';
+
+  useEffect(() => {
+    if (!isCompactMobile) {
+      setShowMobileActions(false);
+    }
+  }, [isCompactMobile]);
 
   const normalizeText = (value) =>
     (value || '')
@@ -592,17 +601,20 @@ const Dashboard = () => {
   }, [filteredByYear]);
 
   const handleReload = async () => {
+    setShowMobileActions(false);
     setReloading(true);
     await refreshQuotes();
     setReloading(false);
   };
 
   const handleStartLayoutEdit = () => {
+    setShowMobileActions(false);
     setLayoutDraftSnapshot(cloneLayouts(layouts));
     setEditingLayout(true);
   };
 
   const handleSaveLayoutEdit = () => {
+    setShowMobileActions(false);
     const normalized = normalizeLayouts(layouts);
     setLayouts(normalized);
     saveLayoutsToStorage(normalized);
@@ -611,6 +623,7 @@ const Dashboard = () => {
   };
 
   const handleCancelLayoutEdit = () => {
+    setShowMobileActions(false);
     if (layoutDraftSnapshot) {
       setLayouts(cloneLayouts(layoutDraftSnapshot));
     }
@@ -625,6 +638,7 @@ const Dashboard = () => {
   };
 
   const handleResetLayout = () => {
+    setShowMobileActions(false);
     setLayouts(cloneLayouts(DASHBOARD_DEFAULT_LAYOUTS));
   };
 
@@ -1045,20 +1059,20 @@ const Dashboard = () => {
     selectedCard && selectedCardDetails && typeof document !== 'undefined'
       ? createPortal(
           <div
-            className="cyber-overlay fixed inset-0 z-40 flex items-center justify-center bg-slate-950/80 px-3 py-4 backdrop-blur-sm"
+            className="cyber-overlay fixed inset-0 z-40 flex items-center justify-center bg-slate-950/80 px-2 py-3 backdrop-blur-sm sm:px-3 sm:py-4"
             onClick={() => setSelectedCardId(null)}
           >
             <div
-              className="card cyber-dialog w-full max-w-4xl border border-white/15 p-4 sm:p-5"
+              className="card cyber-dialog max-h-[92dvh] w-full max-w-[calc(100vw-1rem)] overflow-y-auto border border-white/15 p-3 sm:max-w-4xl sm:p-5"
               onClick={(event) => event.stopPropagation()}
             >
-              <div className="mb-3 flex items-start justify-between gap-3 sm:mb-4">
-                <div className="flex items-start gap-3">
+              <div className="mb-3 flex items-start justify-between gap-2 sm:mb-4 sm:gap-3">
+                <div className="flex min-w-0 items-start gap-2 sm:gap-3">
                   <div className="rounded-xl bg-white/10 p-2 text-slate-200">{selectedCard.icon}</div>
                   <div>
                     <p className="text-xs uppercase tracking-wide text-slate-400">Detalhes do card</p>
-                    <h3 className="text-base font-bold text-white sm:text-lg">{selectedCard.title}</h3>
-                    <p className="text-xs text-slate-400 sm:text-sm">{selectedCard.description}</p>
+                    <h3 className="text-sm font-bold text-white sm:text-lg">{selectedCard.title}</h3>
+                    <p className="text-[11px] leading-snug text-slate-400 sm:text-sm">{selectedCard.description}</p>
                   </div>
                 </div>
                 <button
@@ -1101,11 +1115,11 @@ const Dashboard = () => {
                 {selectedCardDetails.list.length === 0 ? (
                   <p className="text-xs text-slate-400">Nenhum orcamento para este card no filtro atual.</p>
                 ) : (
-                  <div className="max-h-[45vh] space-y-2 overflow-y-auto pr-1">
+                  <div className="max-h-[40dvh] space-y-2 overflow-y-auto pr-1 sm:max-h-[45vh]">
                     {selectedCardDetails.list.map((quote) => (
                       <div
                         key={quote.id}
-                        className="flex flex-col gap-2 rounded-lg border border-white/10 bg-black/20 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+                        className="flex flex-col gap-2 rounded-lg border border-white/10 bg-black/20 px-2.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:px-3"
                       >
                         <div className="min-w-0">
                           <p className="truncate text-xs font-semibold text-white sm:text-sm">
@@ -1130,6 +1144,48 @@ const Dashboard = () => {
           document.body,
         )
       : null;
+
+  const mobileSecondaryActions = (
+    <>
+      <button className="toolbar-btn" onClick={handleReload} title="Recarregar planilha" aria-label="Recarregar planilha">
+        <RefreshCw className={`h-4 w-4 ${reloading ? 'animate-spin' : ''}`} />
+        Recarregar
+      </button>
+      {!editingLayout ? (
+        <button className="toolbar-btn" onClick={handleStartLayoutEdit}>
+          <LayoutGrid className="h-4 w-4" />
+          Editar layout
+        </button>
+      ) : (
+        <>
+          <button className="toolbar-btn-primary" onClick={handleSaveLayoutEdit}>
+            <LayoutGrid className="h-4 w-4" />
+            Salvar layout
+          </button>
+          <button className="toolbar-btn" onClick={handleCancelLayoutEdit}>
+            <X className="h-4 w-4" />
+            Cancelar
+          </button>
+          <button className="toolbar-btn" onClick={handleResetLayout}>
+            <RotateCcw className="h-4 w-4" />
+            Resetar layout
+          </button>
+        </>
+      )}
+      <button
+        type="button"
+        onClick={() => {
+          setShowSheets((prev) => !prev);
+          setShowMobileActions(false);
+        }}
+        className="toolbar-btn"
+      >
+        <Database className="h-4 w-4 text-slate-400" />
+        Planilhas vinculadas
+        {showSheets ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+      </button>
+    </>
+  );
 
   return (
     <div className="dashboard-showcase-shell space-y-2.5 sm:space-y-3">
@@ -1167,47 +1223,78 @@ const Dashboard = () => {
           </div>
         </div>
         <div className="dashboard-hero-actions">
-          <div className="dashboard-action-row">
-            <button className="toolbar-btn" onClick={handleReload} title="Recarregar planilha" aria-label="Recarregar planilha">
-              <RefreshCw className={`h-4 w-4 ${reloading ? 'animate-spin' : ''}`} />
-            </button>
-            {!editingLayout ? (
-              <button className="toolbar-btn" onClick={handleStartLayoutEdit}>
-                <LayoutGrid className="h-4 w-4" />
-                Editar layout
+          {!isCompactMobile ? (
+            <div className="dashboard-action-row">
+              <button className="toolbar-btn" onClick={handleReload} title="Recarregar planilha" aria-label="Recarregar planilha">
+                <RefreshCw className={`h-4 w-4 ${reloading ? 'animate-spin' : ''}`} />
               </button>
-            ) : (
-              <>
-                <button className="toolbar-btn-primary" onClick={handleSaveLayoutEdit}>
+              {!editingLayout ? (
+                <button className="toolbar-btn" onClick={handleStartLayoutEdit}>
                   <LayoutGrid className="h-4 w-4" />
-                  Salvar layout
+                  Editar layout
                 </button>
-                <button className="toolbar-btn" onClick={handleCancelLayoutEdit}>
-                  <X className="h-4 w-4" />
-                  Cancelar
+              ) : (
+                <>
+                  <button className="toolbar-btn-primary" onClick={handleSaveLayoutEdit}>
+                    <LayoutGrid className="h-4 w-4" />
+                    Salvar layout
+                  </button>
+                  <button className="toolbar-btn" onClick={handleCancelLayoutEdit}>
+                    <X className="h-4 w-4" />
+                    Cancelar
+                  </button>
+                </>
+              )}
+              {editingLayout && (
+                <button className="toolbar-btn" onClick={handleResetLayout}>
+                  <RotateCcw className="h-4 w-4" />
+                  Resetar layout
                 </button>
-              </>
-            )}
-            {editingLayout && (
-              <button className="toolbar-btn" onClick={handleResetLayout}>
-                <RotateCcw className="h-4 w-4" />
-                Resetar layout
+              )}
+              <button className="toolbar-btn-primary" onClick={() => navigate('/orcamentos')}>
+                <Plus className="h-4 w-4" />
+                Novo orcamento
               </button>
-            )}
-            <button className="toolbar-btn-primary" onClick={() => navigate('/orcamentos')}>
-              <Plus className="h-4 w-4" />
-              Novo orcamento
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowSheets((prev) => !prev)}
-              className="toolbar-btn"
-            >
-              <Database className="h-4 w-4 text-slate-400" />
-              <span className="hidden md:inline">Planilhas vinculadas</span>
-              {showSheets ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-            </button>
-          </div>
+              <button
+                type="button"
+                onClick={() => setShowSheets((prev) => !prev)}
+                className="toolbar-btn"
+              >
+                <Database className="h-4 w-4 text-slate-400" />
+                <span className="hidden md:inline">Planilhas vinculadas</span>
+                {showSheets ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+              </button>
+            </div>
+          ) : (
+            <div className="dashboard-mobile-actions">
+              <div className="dashboard-mobile-primary-row">
+                {editingLayout ? (
+                  <button className="toolbar-btn-primary" onClick={handleSaveLayoutEdit}>
+                    <LayoutGrid className="h-4 w-4" />
+                    Salvar layout
+                  </button>
+                ) : (
+                  <button className="toolbar-btn-primary" onClick={() => navigate('/orcamentos')}>
+                    <Plus className="h-4 w-4" />
+                    Novo orcamento
+                  </button>
+                )}
+                <button className="toolbar-btn dashboard-mobile-icon-btn" onClick={handleReload} title="Recarregar planilha" aria-label="Recarregar planilha">
+                  <RefreshCw className={`h-4 w-4 ${reloading ? 'animate-spin' : ''}`} />
+                </button>
+                <button
+                  type="button"
+                  className={`toolbar-btn dashboard-mobile-menu-trigger ${showMobileActions ? 'is-open' : ''}`}
+                  onClick={() => setShowMobileActions((prev) => !prev)}
+                  aria-expanded={showMobileActions}
+                  aria-label="Abrir mais acoes"
+                >
+                  <Ellipsis className="h-4 w-4" />
+                </button>
+              </div>
+              {showMobileActions ? <div className="dashboard-mobile-action-sheet">{mobileSecondaryActions}</div> : null}
+            </div>
+          )}
           <div className="dashboard-meta-row">
             {editingLayout && (
               <p className="text-[11px] text-sky-200">

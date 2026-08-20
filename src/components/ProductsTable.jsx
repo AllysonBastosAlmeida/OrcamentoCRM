@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Loader2, Pencil, RefreshCw, Trash2 } from 'lucide-react';
 import { formatCurrency } from '../utils/formatters.js';
 
@@ -37,7 +37,7 @@ const ProductsTable = ({ products, loading, onRefresh, onEdit, onDelete, canMana
         return true;
       }
       const haystack = normalizeText(
-        [product.name, product.sku, product.description, product.category].filter(Boolean).join(' '),
+        [product.name, product.sku, product.description, product.category, product.serviceReference].filter(Boolean).join(' '),
       );
       return haystack.includes(normalizedQuery);
     });
@@ -50,14 +50,6 @@ const ProductsTable = ({ products, loading, onRefresh, onEdit, onDelete, canMana
     const start = (currentPage - 1) * pageSize;
     return filteredProducts.slice(start, start + pageSize);
   }, [filteredProducts, currentPage, pageSize]);
-
-  useEffect(() => {
-    setPage(1);
-  }, [query, categoryFilter]);
-
-  useEffect(() => {
-    if (page !== currentPage) setPage(currentPage);
-  }, [page, currentPage]);
 
   return (
     <div className="card overflow-hidden">
@@ -82,7 +74,10 @@ const ProductsTable = ({ products, loading, onRefresh, onEdit, onDelete, canMana
             <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 sm:text-xs">Buscar</span>
             <input
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setPage(1);
+              }}
               data-global-search
               placeholder="Nome, SKU, descricao..."
               className="w-full bg-transparent text-[11px] text-white outline-none placeholder:text-slate-500 sm:text-xs"
@@ -94,7 +89,10 @@ const ProductsTable = ({ products, loading, onRefresh, onEdit, onDelete, canMana
             </span>
             <select
               value={categoryFilter}
-              onChange={(event) => setCategoryFilter(event.target.value)}
+              onChange={(event) => {
+                setCategoryFilter(event.target.value);
+                setPage(1);
+              }}
               className="bg-transparent text-[11px] text-white outline-none sm:text-xs"
             >
               <option value="all">Todas</option>
@@ -135,6 +133,9 @@ const ProductsTable = ({ products, loading, onRefresh, onEdit, onDelete, canMana
                       <p className="break-words text-xs font-semibold text-white">{product.name}</p>
                     </div>
                     <p className="break-words text-[10px] text-slate-400">{product.category || 'Sem categoria'}</p>
+                    {product.serviceReference ? (
+                      <p className="mt-1 break-words text-[10px] text-sky-200/90">Servico: {product.serviceReference}</p>
+                    ) : null}
                   </div>
                   <div className="flex flex-col items-end gap-1 text-right">
                     <span className="text-xs font-semibold text-white">{formatCurrency(product.price)}</span>
@@ -173,6 +174,7 @@ const ProductsTable = ({ products, loading, onRefresh, onEdit, onDelete, canMana
               <th className="w-14 px-3 py-0.5 sm:px-4 sm:py-1.5">Item</th>
               <th className="w-[280px] px-3 py-0.5 sm:px-4 sm:py-1.5">Produto</th>
               <th className="hidden px-3 py-0.5 lg:table-cell lg:px-4 lg:py-1.5">SKU</th>
+              <th className="hidden px-3 py-0.5 xl:table-cell xl:px-4 xl:py-1.5">Ref. Servico</th>
               <th className="w-24 px-3 py-0.5 sm:px-4 sm:py-1.5">Preço</th>
               <th className="w-20 px-3 py-0.5 sm:px-4 sm:py-1.5">Estoque</th>
               <th className="hidden px-3 py-0.5 lg:table-cell lg:px-4 lg:py-1.5">Categoria</th>
@@ -185,7 +187,7 @@ const ProductsTable = ({ products, loading, onRefresh, onEdit, onDelete, canMana
               <tr>
                 <td
                   className="px-3 py-3 text-center text-xs text-slate-400 sm:px-4 sm:py-6 sm:text-sm"
-                  colSpan={showActions ? 8 : 7}
+                  colSpan={showActions ? 9 : 8}
                 >
                   Nenhum produto encontrado com os filtros atuais.
                 </td>
@@ -210,6 +212,11 @@ const ProductsTable = ({ products, loading, onRefresh, onEdit, onDelete, canMana
                       </p>
                     </td>
                     <td className="hidden px-3 py-0.5 lg:table-cell lg:px-4 lg:py-1.5 text-slate-200">{product.sku}</td>
+                    <td className="hidden px-3 py-0.5 xl:table-cell xl:px-4 xl:py-1.5 text-slate-200">
+                      <span className="block truncate" title={product.serviceReference || ''}>
+                        {product.serviceReference || '--'}
+                      </span>
+                    </td>
                     <td className="px-3 py-0.5 sm:px-4 sm:py-1.5 text-white">{formatCurrency(product.price)}</td>
                     <td className="px-3 py-0.5 sm:px-4 sm:py-1.5 text-slate-200">{product.stock}</td>
                     <td className="hidden px-3 py-0.5 lg:table-cell lg:px-4 lg:py-1.5 text-slate-200">
@@ -257,7 +264,7 @@ const ProductsTable = ({ products, loading, onRefresh, onEdit, onDelete, canMana
         <div className="flex items-center justify-center gap-2 border-t border-white/5 bg-white/5 px-3 py-2 text-[11px] text-slate-300 sm:text-xs">
           <button
             className="btn-secondary"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            onClick={() => setPage(Math.max(1, currentPage - 1))}
             disabled={currentPage === 1}
           >
             Anterior
@@ -279,7 +286,7 @@ const ProductsTable = ({ products, loading, onRefresh, onEdit, onDelete, canMana
           </span>
           <button
             className="btn-secondary"
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            onClick={() => setPage(Math.min(totalPages, currentPage + 1))}
             disabled={currentPage === totalPages}
           >
             Próximo

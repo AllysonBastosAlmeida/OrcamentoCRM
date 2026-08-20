@@ -1,8 +1,11 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, Plus } from 'lucide-react';
+import ModalPortal from '../components/ModalPortal.jsx';
 import ProductsTable from '../components/ProductsTable.jsx';
 import { useProducts } from '../hooks/useProducts.js';
 import { useToast } from '../components/ToastHost.jsx';
+import { graphConfig } from '../services/api.js';
+import { suggestServiceReferenceForProduct } from '../utils/quoteImporter.js';
 
 const Produtos = () => {
   const {
@@ -19,6 +22,7 @@ const Produtos = () => {
     updateProduct,
     removeProduct,
   } = useProducts();
+  const serviceCatalog = useProducts(graphConfig.sheetServicos);
 
   const { pushToast } = useToast();
   const baseUrl = import.meta.env.BASE_URL || '/';
@@ -35,6 +39,8 @@ const Produtos = () => {
     unit: 'Un',
     price: '',
     category: '',
+    serviceReference: '',
+    scopeTemplate: '',
   });
 
   const categoryOptions = useMemo(() => {
@@ -51,7 +57,7 @@ const Produtos = () => {
   const parsePrice = (value) => {
     if (typeof value === 'number') return value;
     if (!value) return 0;
-    const cleaned = value.toString().replace(/[^0-9,.\-]/g, '');
+    const cleaned = value.toString().replace(/[^0-9,.-]/g, '');
     if (!cleaned) return 0;
     if (cleaned.includes('.') && cleaned.includes(',')) {
       const normalized = cleaned.replace(/\./g, '').replace(',', '.');
@@ -88,6 +94,8 @@ const Produtos = () => {
       unit: 'Un',
       price: '',
       category: categoryOptions[0] || '',
+      serviceReference: '',
+      scopeTemplate: '',
     });
     setAddError('');
     setAddOpen(true);
@@ -103,12 +111,18 @@ const Produtos = () => {
       pushToast('Item sem referencia na planilha. Nao e possivel editar.', 'error');
       return;
     }
+    const suggestedServiceReference =
+      sheet === sheetServicos
+        ? ''
+        : product.serviceReference || suggestServiceReferenceForProduct(product, serviceCatalog.products) || '';
     setEditingProduct(product);
     setAddForm({
       description: product.name || product.description || '',
       unit: product.unit || 'Un',
       price: formatPriceInput(product.price),
       category: product.category || categoryOptions[0] || '',
+      serviceReference: suggestedServiceReference,
+      scopeTemplate: product.scopeTemplate || '',
     });
     setAddError('');
     setAddOpen(true);
@@ -128,6 +142,7 @@ const Produtos = () => {
     };
     window.addEventListener('keydown', handleKeydown);
     return () => window.removeEventListener('keydown', handleKeydown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addOpen, saving]);
 
   const isEditing = Boolean(editingProduct);
@@ -143,6 +158,8 @@ const Produtos = () => {
     }
     const description = addForm.description.trim();
     const category = addForm.category.trim();
+    const serviceReference = addForm.serviceReference.trim();
+    const scopeTemplate = addForm.scopeTemplate.trim();
     const priceValue = parsePrice(addForm.price);
     if (!description) {
       setAddError('Informe a descricao do item.');
@@ -168,6 +185,8 @@ const Produtos = () => {
           unit: addForm.unit,
           price: priceValue,
           category,
+          serviceReference,
+          scopeTemplate,
         });
         pushToast('Item atualizado.', 'success');
       } else {
@@ -176,6 +195,8 @@ const Produtos = () => {
           unit: addForm.unit,
           price: priceValue,
           category,
+          serviceReference,
+          scopeTemplate,
         });
         pushToast('Item adicionado.', 'success');
       }
@@ -219,6 +240,7 @@ const Produtos = () => {
   };
 
   const currentSheetLabel = sheet === sheetServicos ? 'Servicos' : 'Materiais';
+  const isServicesSheet = sheet === sheetServicos;
   const modalTitle = isEditing ? 'Editar item' : 'Novo item';
   const modalActionLabel = isEditing ? 'Salvar' : 'Adicionar';
   const modalSavingLabel = isEditing ? 'Salvando alteracoes' : 'Salvando item';
@@ -295,7 +317,8 @@ const Produtos = () => {
       />
 
       {addOpen && (
-        <div
+        <ModalPortal>
+          <div
           className="cyber-overlay fixed inset-0 z-40 flex items-center justify-center bg-black/70 px-4"
           onMouseDown={(event) => {
             if (event.target !== event.currentTarget || saving) return;
@@ -370,6 +393,42 @@ const Produtos = () => {
                 </select>
               </label>
 
+              {!isServicesSheet ? (
+                <label className="block text-xs font-semibold text-slate-300 sm:text-sm">
+                  Referencia de Servico
+                  <input
+                    list="service-reference-options"
+                    value={addForm.serviceReference}
+                    onChange={(e) => setAddForm((prev) => ({ ...prev, serviceReference: e.target.value }))}
+                    className="mt-1 w-full rounded-xl border border-white/15 bg-slate-950 px-3 py-1.5 text-xs text-white outline-none focus:border-primary/60 placeholder:text-slate-500 sm:py-2 sm:text-sm"
+                    placeholder="Ex: Conectorizacao de rede keystone/RJ45"
+                  />
+                  <datalist id="service-reference-options">
+                    {serviceCatalog.products.map((service) => (
+                      <option key={service.id || service.sku || service.name} value={service.name} />
+                    ))}
+                  </datalist>
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    O importador de orcamento usara esta referencia antes da comparacao automatica.
+                  </p>
+                </label>
+              ) : (
+                <label className="block text-xs font-semibold text-slate-300 sm:text-sm">
+                  Modelo de escopo
+                  <textarea
+                    value={addForm.scopeTemplate}
+                    onChange={(e) => setAddForm((prev) => ({ ...prev, scopeTemplate: e.target.value }))}
+                    rows={5}
+                    className="mt-1 w-full resize-y rounded-xl border border-white/15 bg-slate-950 px-3 py-2 text-xs text-white outline-none focus:border-primary/60 placeholder:text-slate-500 sm:text-sm"
+                    placeholder="Ex: Instalação de {quantidade} câmeras {local}, incluindo fixação, conexão e validação da imagem."
+                  />
+                  <p className="mt-1 text-[11px] font-normal text-slate-400">
+                    Variáveis disponíveis: {'{quantidade}'}, {'{unidade}'}, {'{local}'}, {'{servico}'} e {'{categoria}'}.
+                    Requer uma coluna “Modelo de Escopo” ou “Escopo Padrão” na aba de serviços.
+                  </p>
+                </label>
+              )}
+
               <div className="text-[11px] text-slate-400 sm:text-xs">
                 Quantidade, total e observacao serao mantidos em branco para a planilha calcular.
               </div>
@@ -397,11 +456,13 @@ const Produtos = () => {
               </button>
             </div>
           </div>
-        </div>
+          </div>
+        </ModalPortal>
       )}
 
       {saving && addOpen && (
-        <div className="cyber-overlay fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4 backdrop-blur-sm">
+        <ModalPortal>
+          <div className="cyber-overlay fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4 backdrop-blur-sm">
           <div className="cyber-dialog cyber-loading-dialog flex w-full max-w-sm flex-col items-center gap-4 rounded-2xl border border-white/15 bg-white/5 p-6 text-center shadow-2xl">
             <div className="relative flex h-24 w-24 items-center justify-center">
               <div className="absolute h-24 w-24 animate-spin rounded-full border-2 border-primary/40 border-t-transparent" />
@@ -413,11 +474,13 @@ const Produtos = () => {
               <p className="text-xs text-slate-300">Aguarde alguns instantes.</p>
             </div>
           </div>
-        </div>
+          </div>
+        </ModalPortal>
       )}
 
       {(deletingItem || deletingItem === 0) && (
-        <div className="cyber-overlay fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4 backdrop-blur-sm">
+        <ModalPortal>
+          <div className="cyber-overlay fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4 backdrop-blur-sm">
           <div className="cyber-dialog cyber-loading-dialog flex w-full max-w-sm flex-col items-center gap-4 rounded-2xl border border-white/15 bg-white/5 p-6 text-center shadow-2xl">
             <div className="relative flex h-24 w-24 items-center justify-center">
               <div className="absolute h-24 w-24 animate-spin rounded-full border-2 border-primary/40 border-t-transparent" />
@@ -429,7 +492,8 @@ const Produtos = () => {
               <p className="text-xs text-slate-300">Aguarde alguns instantes.</p>
             </div>
           </div>
-        </div>
+          </div>
+        </ModalPortal>
       )}
     </div>
   );

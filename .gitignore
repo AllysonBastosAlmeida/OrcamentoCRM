@@ -10,6 +10,12 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+dist-debug
+dist-map
+tmp
+.env
+.env.*
+!.env.example
 *.local
 
 # Editor directories and files

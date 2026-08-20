@@ -11,6 +11,7 @@ import ShowcaseThemeLayer from './components/ShowcaseThemeLayer.jsx';
 import ScrollToTopButton from './components/ScrollToTopButton.jsx';
 import CyberModeLayer from './components/CyberModeLayer.jsx';
 import { ToastProvider } from './components/ToastHost.jsx';
+import ModalPortal from './components/ModalPortal.jsx';
 import { getActiveAccount, hasMsalConfig, loginRequest } from './auth.js';
 import { setCurrentUser } from './utils/userSession.js';
 
@@ -563,7 +564,8 @@ function App() {
           </div>
         )}
         {legacyThemePromptOpen ? (
-          <div className="cyber-overlay fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/78 px-4 backdrop-blur-sm">
+          <ModalPortal>
+            <div className="cyber-overlay fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/78 px-4 backdrop-blur-sm">
             <button
               type="button"
               className="absolute inset-0"
@@ -617,7 +619,8 @@ function App() {
                 </button>
               </div>
             </form>
-          </div>
+            </div>
+          </ModalPortal>
         ) : null}
       </div>
     </ToastProvider>

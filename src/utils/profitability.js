@@ -40,7 +40,7 @@ export const PROFITABILITY_ASSUMPTIONS = {
 
 export const calculateQuoteProfitability = (quote) => {
   const items = Array.isArray(quote?.items) ? quote.items : [];
-  const revenue = roundCurrency(quote?.totalNumber ?? quote?.total ?? 0);
+  const revenue = roundCurrency(quote?.total ?? quote?.totalNumber ?? 0);
 
   if (!items.length) {
     return {

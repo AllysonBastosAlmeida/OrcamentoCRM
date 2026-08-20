@@ -63,7 +63,6 @@ const ShowcaseHeader = ({
   const operationHeroImage = showcaseNavGroups.find((group) => group.id === 'operacao')?.heroImage || 'showcase-clever-command-hero.jpg';
   const heroImage = isMobileViewport ? operationHeroImage : previewGroup?.heroImage || operationHeroImage;
   const heroImageUrl = `${normalizedBaseUrl}${heroImage}`;
-  const showHeroBrandAccent = heroImage === operationHeroImage;
   const heroTitle = meta.title.split('\n');
   const activeSubsection = activeGroup.items.find((item) => item.to === currentPath) || activeGroup.items[0];
 
@@ -183,16 +182,6 @@ const ShowcaseHeader = ({
         <img src={heroImageUrl} alt="" className="showcase-hero-bg-image" />
       </div>
       <div className="showcase-hero-gradient" aria-hidden="true" />
-      {showHeroBrandAccent ? (
-        <div className="showcase-hero-brand-accent" aria-hidden="true">
-          <span className="showcase-hero-brand-accent-aura" />
-          <span className="showcase-hero-brand-accent-line" />
-          <span className="showcase-hero-brand-accent-trace" />
-          <span className="showcase-hero-brand-accent-glow" />
-          <span className="showcase-hero-brand-accent-dot showcase-hero-brand-accent-dot-start" />
-          <span className="showcase-hero-brand-accent-dot showcase-hero-brand-accent-dot-end" />
-        </div>
-      ) : null}
 
       <div
         className={`showcase-nav-shell ${navPinned ? 'showcase-nav-shell-pinned' : ''}`}

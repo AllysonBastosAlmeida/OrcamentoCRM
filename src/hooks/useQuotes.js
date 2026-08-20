@@ -51,7 +51,7 @@ export const useQuotes = () => {
       responsible: remote?.responsible || local?.responsible,
       total: remote?.total ?? local?.total,
       subtotal: remote?.subtotal ?? local?.subtotal,
-      totalNumber: remote?.totalNumber ?? local?.totalNumber,
+      totalNumber: remote?.total ?? local?.total ?? remote?.totalNumber ?? local?.totalNumber,
       createdAt: remote?.createdAt || local?.createdAt,
       validUntil: remote?.validUntil || local?.validUntil,
       items: preferNonEmpty(local?.items, remote?.items) || [],
@@ -93,7 +93,7 @@ export const useQuotes = () => {
         const mapped = history.map((h, idx) => {
           const details = h.details || {};
           const sheetApproval = h.approval || '';
-          const totalNumber = toNumber(details.total ?? details.subtotal ?? h.totalNumber ?? h.total);
+          const totalNumber = toNumber(details.total ?? details.totalNumber ?? details.subtotal ?? h.totalNumber ?? h.total);
           return {
             id: details.id || `po-${h.poNumber || idx}-${h.clientName || ''}`,
             poNumber: details.poNumber || h.poNumber,
@@ -116,7 +116,7 @@ export const useQuotes = () => {
             updatedAt: details.updatedAt || '',
             subtotal: details.subtotal ?? totalNumber,
             total: details.total ?? totalNumber,
-            totalNumber: details.totalNumber ?? totalNumber,
+            totalNumber: details.total ?? details.totalNumber ?? totalNumber,
             items: Array.isArray(details.items) ? details.items : [],
             notes: details.notes || h.notes || '',
             approvalStatus: sheetApproval || details.approvalStatus || '',

@@ -1,10 +1,12 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
-import { Copy, Eraser, ExternalLink, Filter, Plus, RefreshCw } from 'lucide-react';
+import { Copy, Eraser, ExternalLink, Filter, Plus, RefreshCw, Sparkles } from 'lucide-react';
 import { Suspense, lazy } from 'react';
+import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import QuotesTable from '../components/QuotesTable.jsx';
 import { useQuotes } from '../hooks/useQuotes.js';
 import { useProducts } from '../hooks/useProducts.js';
+import ModalPortal from '../components/ModalPortal.jsx';
 import { graphConfig } from '../services/api.js';
 import { useClients } from '../hooks/useClients.js';
 import { formatCurrency } from '../utils/formatters.js';
@@ -14,8 +16,13 @@ import { createQuoteDraft } from '../services/mail.js';
 import { calculateQuoteProfitability } from '../utils/profitability.js';
 
 const FILTERS_KEY = 'crm-orcamentos:orcamentos-filters';
+const DEFAULT_EMAIL_CC = 'contato@cleverconnection.com.br';
 const QuoteModal = lazy(() => import('../components/QuoteModal.jsx'));
 const ExportButtons = lazy(() => import('../components/ExportButtons.jsx'));
+const DEFAULT_MODAL_LAUNCH = Object.freeze({
+  initialActiveTab: 'materiais',
+  initialActiveStep: 'cliente',
+});
 
 const normalizeEmailText = (value) =>
   (value || '')
@@ -23,39 +30,40 @@ const normalizeEmailText = (value) =>
     .replace(/\s+/g, ' ')
     .trim();
 
-const buildServiceSummary = (quote) => {
-  const content = [quote?.title, quote?.category, quote?.scope]
-    .map(normalizeEmailText)
-    .filter(Boolean)
-    .join(' ')
+const normalizeLookupKey = (value) =>
+  normalizeEmailText(value)
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
     .toLowerCase();
 
-  if (!content) {
-    return 'os serviços previstos para atendimento da demanda solicitada';
+const SERVICE_SUMMARY_RULES = [
+  { pattern: /(telecom|telefonia|telefon|ramal|par metal|dg central|bloco m10)/, summary: 'o serviço de telefonia' },
+  { pattern: /(cftv|camera|monitoramento)/, summary: 'os serviços relacionados ao sistema de CFTV e monitoramento' },
+  { pattern: /(fibra|optica|fusao)/, summary: 'os serviços de infraestrutura e conectividade em fibra óptica' },
+  { pattern: /(cabeamento|rede|dados|lan)/, summary: 'os serviços de rede e cabeamento estruturado' },
+  { pattern: /(controle de acesso|catraca|fechadura|interfonia|portaria)/, summary: 'os serviços relacionados ao sistema de controle de acesso' },
+  { pattern: /(audiovisual|audio visual)/, summary: 'os serviços relacionados ao sistema audiovisual' },
+  { pattern: /(ciber seguranca|cyber security|seguranca)/, summary: 'os serviços relacionados à cibersegurança' },
+];
+
+const buildServiceSummary = (quote) => {
+  const categoryLabel = normalizeEmailText(quote?.category);
+  const categoryKey = normalizeLookupKey(categoryLabel);
+  const fallbackContent = [quote?.title, quote?.scope].map(normalizeEmailText).filter(Boolean).join(' ');
+  const fallbackKey = normalizeLookupKey(fallbackContent);
+
+  if (categoryKey) {
+    const categoryMatch = SERVICE_SUMMARY_RULES.find((rule) => rule.pattern.test(categoryKey));
+    if (categoryMatch) return categoryMatch.summary;
   }
 
-  if (/(telefon|ramal|par metal|bloco m10|dg central|portaria)/.test(content)) {
-    return 'o serviço de telefonia relacionado ao ramal de emergência';
+  if (fallbackKey) {
+    const fallbackMatch = SERVICE_SUMMARY_RULES.find((rule) => rule.pattern.test(fallbackKey));
+    if (fallbackMatch) return fallbackMatch.summary;
   }
 
-  if (/(camera|cftv|monitoramento|gravador|dvr|nvr)/.test(content)) {
-    return 'os serviços relacionados ao sistema de CFTV e monitoramento';
-  }
-
-  if (/(fibra|optica|óptica|fusao|fusão)/.test(content)) {
-    return 'os serviços de infraestrutura e conectividade em fibra óptica';
-  }
-
-  if (/(rede|cabeamento|switch|rack|lan|dados)/.test(content)) {
-    return 'os serviços de rede e cabeamento estruturado';
-  }
-
-  if (/(controle de acesso|catraca|fechadura|interfon|portao|portão)/.test(content)) {
-    return 'os serviços relacionados ao sistema de controle de acesso';
-  }
-
-  if (quote?.category) {
-    return `os serviços de ${normalizeEmailText(quote.category).toLowerCase()}`;
+  if (categoryLabel) {
+    return `os serviços de ${categoryLabel.toLowerCase()}`;
   }
 
   return 'os serviços previstos para atendimento da demanda solicitada';
@@ -63,42 +71,125 @@ const buildServiceSummary = (quote) => {
 
 const buildScopeLine = (quote) => `A proposta considera ${buildServiceSummary(quote)}.`;
 
-const buildEmailDraft = (quote) => {
-  const clientLabel = quote?.clientName || quote?.clientCompany || 'cliente';
+const formatEmailDate = (value) => {
+  const normalized = normalizeEmailText(value);
+  if (!normalized) return null;
+
+  const localDateMatch = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (localDateMatch) {
+    const [, year, month, day] = localDateMatch;
+    return `${day}/${month}/${year}`;
+  }
+
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) {
+    return normalized;
+  }
+
+  return parsed.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
+};
+
+const resolveQuoteTotal = (quote) => {
+  if (quote?.total !== undefined && quote?.total !== null && quote?.total !== '') {
+    return Number(quote.total || 0);
+  }
+  if (quote?.totalNumber !== undefined && quote?.totalNumber !== null && quote?.totalNumber !== '') {
+    return Number(quote.totalNumber || 0);
+  }
+  return 0;
+};
+
+const buildGreetingLine = (quote) => {
+  const clientName = normalizeEmailText(quote?.clientName);
+  const companyLabel = normalizeEmailText(quote?.clientCompany);
+
+  if (clientName && normalizeLookupKey(clientName) !== normalizeLookupKey(companyLabel)) {
+    return `Prezado(a) ${clientName},`;
+  }
+
+  return 'Prezados,';
+};
+
+const buildEmailContent = (quote) => {
   const companyLabel = quote?.clientCompany || quote?.clientName || 'cliente';
   const projectLabel = quote?.title || 'projeto em andamento';
   const poLabel = quote?.poNumber ? `PO ${quote.poNumber}` : 'PO pendente';
-  const totalLabel = formatCurrency(quote?.totalNumber ?? quote?.total ?? 0);
-  const validUntilLabel = quote?.validUntil
-    ? new Date(quote.validUntil).toLocaleDateString('pt-BR')
-    : null;
-  const subject = `Orçamento - ${projectLabel}`;
-  const body = [
-    `Prezado(a) ${clientLabel},`,
-    '',
-    'Conforme alinhado, encaminho o orçamento elaborado para sua análise.',
-    '',
-    buildScopeLine(quote),
-    '',
-    'Resumo da proposta:',
-    `- Cliente: ${companyLabel}`,
-    `- Projeto: ${projectLabel}`,
-    `- Referência interna: ${poLabel}`,
-    `- Valor total: ${totalLabel}`,
-    ...(validUntilLabel ? [`- Validade da proposta: ${validUntilLabel}`] : []),
-    '',
-    'Fico à disposição para esclarecer qualquer ponto e, se necessário, ajustar a proposta conforme sua avaliação.',
-  ].join('\n');
+  const totalLabel = formatCurrency(resolveQuoteTotal(quote));
+  const validUntilLabel = formatEmailDate(quote?.validUntil);
+  const subjectParts = ['Orçamento'];
+  if (quote?.poNumber) {
+    subjectParts.push(`PO ${quote.poNumber}`);
+  }
+  subjectParts.push(projectLabel);
 
   return {
     to: quote?.clientEmail || '',
-    subject,
+    subject: subjectParts.join(' - '),
+    greeting: buildGreetingLine(quote),
+    intro: 'Conforme alinhado, encaminho o orçamento elaborado para sua análise.',
+    scopeLine: buildScopeLine(quote),
+    summaryTitle: 'Resumo da proposta',
+    summaryRows: [
+      { label: 'Cliente', value: companyLabel },
+      { label: 'Projeto', value: projectLabel },
+      { label: 'Referência interna', value: poLabel },
+      { label: 'Valor total', value: totalLabel, emphasis: 'total' },
+      ...(validUntilLabel ? [{ label: 'Validade da proposta', value: validUntilLabel }] : []),
+    ],
+    closing: 'Fico à disposição para esclarecer qualquer ponto e, se necessário, ajustar a proposta conforme sua avaliação.',
+  };
+};
+
+const renderEmailText = (content) =>
+  [
+    content.greeting,
+    '',
+    content.intro,
+    '',
+    content.scopeLine,
+    '',
+    `${content.summaryTitle}:`,
+    ...content.summaryRows.map((row) => `- ${row.label}: ${row.value}`),
+    '',
+    content.closing,
+  ].join('\n');
+
+const buildEmailDraft = (quote) => {
+  const content = buildEmailContent(quote);
+  const body = renderEmailText(content);
+  return {
+    to: content.to,
+    cc: DEFAULT_EMAIL_CC,
+    subject: content.subject,
     body,
+    template: {
+      subject: content.subject,
+      body,
+      content,
+    },
   };
 };
 
 const buildMailtoUrl = ({ to, subject, body }) =>
   `mailto:${encodeURIComponent(to || '')}?subject=${encodeURIComponent(subject || '')}&body=${encodeURIComponent(body || '')}`;
+
+const buildEmailPreviewHtml = (draft) => {
+  if (!draft) return '';
+
+  const trimmedSubject = draft.subject?.trim() || '';
+  const trimmedBody = draft.body?.trim() || '';
+  const useTemplateHtml = draft.template?.body?.trim() === trimmedBody;
+
+  return useTemplateHtml
+    ? buildEmailHtmlFromContent({
+        ...draft.template.content,
+        subject: trimmedSubject,
+      })
+    : buildEmailHtml({
+        subject: trimmedSubject,
+        body: trimmedBody,
+      });
+};
 
 const buildDraftHint = (quote, subject) => {
   const poLabel = quote?.poNumber ? `PO ${quote.poNumber}` : null;
@@ -115,6 +206,93 @@ const escapeHtml = (value) =>
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
+
+const renderSummaryTableHtml = (summaryRows) =>
+  summaryRows.length
+    ? `<div style="margin:18px 0 18px;">
+        <div style="margin:0 0 12px;font-size:13px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;color:#1d4ed8;">Resumo da proposta</div>
+        <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="width:100%;border:1px solid #dbeafe;border-radius:16px;background:#f8fbff;padding:10px 22px;">
+          <tbody>
+            ${summaryRows
+              .map((row, index) => {
+                const isTotal = row.emphasis === 'total' || row.label.toLowerCase().includes('valor total');
+                const borderTop = isTotal ? 'border-top:1px solid #bfdbfe;' : index > 0 ? 'border-top:1px solid #eff6ff;' : '';
+                return `<tr>
+                  <td style="padding:${isTotal ? '14px 0 12px' : '10px 0'};${borderTop}">
+                    <div style="padding:0 12px;font-size:${isTotal ? '15px' : '13px'};font-weight:800;color:${isTotal ? '#1d4ed8' : '#334155'};margin-bottom:6px;">${escapeHtml(
+                      `${row.label}:`,
+                    )}</div>
+                    <div style="padding:0 12px 0 12px;font-size:${isTotal ? '22px' : '14px'};font-weight:${isTotal ? '800' : '600'};line-height:1.55;color:${isTotal ? '#0f172a' : '#1e293b'};">${escapeHtml(
+                      row.value,
+                    )}</div>
+                  </td>
+                </tr>`;
+              })
+              .join('')}
+          </tbody>
+        </table>
+      </div>`
+    : '';
+
+const wrapEmailHtml = ({ subject, bodyContent }) => `
+  <div style="margin:0;padding:24px;background:#eef4fb;font-family:Segoe UI,Arial,sans-serif;">
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width:720px;width:100%;margin:0 auto;background:#ffffff;border:1px solid #d6e4f2;border-radius:22px;">
+      <tbody>
+        <tr>
+          <td style="padding:22px 24px;background:#123c8f;border-top-left-radius:22px;border-top-right-radius:22px;">
+            <div style="font-size:11px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#dbeafe;">Clever Connection</div>
+            <div style="margin-top:8px;font-size:20px;line-height:1.3;font-weight:800;color:#ffffff;">${escapeHtml(subject || 'Orçamento')}</div>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:26px 24px;">
+        ${bodyContent}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+`;
+
+const buildEmailHtmlFromContent = (content) => {
+  const paragraphConfigs = [
+    {
+      type: 'greeting',
+      value: content.greeting,
+      style: 'margin:0 0 14px;font-size:18px;line-height:1.7;color:#0f172a;font-weight:700;',
+    },
+    { type: 'spacer' },
+    {
+      type: 'paragraph',
+      value: content.intro,
+      style: 'margin:0 0 14px;font-size:15px;line-height:1.7;color:#1e293b;font-weight:400;',
+    },
+    { type: 'spacer' },
+    {
+      type: 'paragraph',
+      value: content.scopeLine,
+      style: 'margin:0 0 14px;font-size:15px;line-height:1.7;color:#1e293b;font-weight:400;',
+    },
+    renderSummaryTableHtml(content.summaryRows),
+    {
+      type: 'paragraph',
+      value: content.closing,
+      style: 'margin:0 0 14px;font-size:15px;line-height:1.7;color:#334155;font-weight:400;',
+    },
+  ];
+
+  const bodyContent = paragraphConfigs
+    .map((entry) => {
+      if (typeof entry === 'string') return entry;
+      if (entry.type === 'spacer') {
+        return '<div style="height:14px;line-height:14px;font-size:14px;">&nbsp;</div>';
+      }
+      return `<p style="${entry.style}">${escapeHtml(entry.value)}</p>`;
+    })
+    .join('');
+
+  return wrapEmailHtml({ subject: content.subject, bodyContent });
+};
 
 const buildEmailHtml = ({ subject, body }) => {
   const lines = (body || '').split('\n').map((line) => line.trim());
@@ -160,52 +338,12 @@ const buildEmailHtml = ({ subject, body }) => {
     })
     .join('');
 
-  const renderedSummary = summaryRows.length
-    ? `<div style="margin:18px 0 18px;">
-        <div style="margin:0 0 12px;font-size:13px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;color:#1d4ed8;">Resumo da proposta</div>
-        <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="width:100%;border:1px solid #dbeafe;border-radius:16px;background:#f8fbff;padding:10px 22px;">
-          <tbody>
-            ${summaryRows
-              .map((row, index) => {
-                const isTotal = row.label.toLowerCase().includes('valor total');
-                const borderTop = isTotal ? 'border-top:1px solid #bfdbfe;' : index > 0 ? 'border-top:1px solid #eff6ff;' : '';
-                return `<tr>
-                  <td style="padding:${isTotal ? '14px 0 12px' : '10px 0'};${borderTop}">
-                    <div style="padding:0 12px;font-size:${isTotal ? '15px' : '13px'};font-weight:800;color:${isTotal ? '#1d4ed8' : '#334155'};margin-bottom:6px;">${escapeHtml(
-                      `${row.label}:`,
-                    )}</div>
-                    <div style="padding:0 12px 0 12px;font-size:${isTotal ? '22px' : '14px'};font-weight:${isTotal ? '800' : '600'};line-height:1.55;color:${isTotal ? '#0f172a' : '#1e293b'};">${escapeHtml(
-                      row.value,
-                    )}</div>
-                  </td>
-                </tr>`;
-              })
-              .join('')}
-          </tbody>
-        </table>
-      </div>`
-    : '';
+  const renderedSummary = renderSummaryTableHtml(summaryRows);
 
-  return `
-    <div style="margin:0;padding:24px;background:#eef4fb;font-family:Segoe UI,Arial,sans-serif;">
-      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width:720px;width:100%;margin:0 auto;background:#ffffff;border:1px solid #d6e4f2;border-radius:22px;">
-        <tbody>
-          <tr>
-            <td style="padding:22px 24px;background:#123c8f;border-top-left-radius:22px;border-top-right-radius:22px;">
-              <div style="font-size:11px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#dbeafe;">Clever Connection</div>
-              <div style="margin-top:8px;font-size:20px;line-height:1.3;font-weight:800;color:#ffffff;">${escapeHtml(subject || 'Orçamento')}</div>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:26px 24px;">
-          ${renderedParagraphs}
-          ${renderedSummary}
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  `;
+  return wrapEmailHtml({
+    subject,
+    bodyContent: `${renderedParagraphs}${renderedSummary}`,
+  });
 };
 
 const formatPercent = (value) => `${Number(value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
@@ -226,6 +364,7 @@ const Orcamentos = () => {
   const [openModal, setOpenModal] = useState(false);
   const [selected, setSelected] = useState(null);
   const [prefillQuote, setPrefillQuote] = useState(null);
+  const [modalLaunchConfig, setModalLaunchConfig] = useState(DEFAULT_MODAL_LAUNCH);
   const [approvalFilter, setApprovalFilter] = useState('Todos');
   const [clientFilter, setClientFilter] = useState('Todos');
   const [search, setSearch] = useState('');
@@ -255,7 +394,15 @@ const Orcamentos = () => {
   const modalClose = () => {
     setSelected(null);
     setPrefillQuote(null);
+    setModalLaunchConfig(DEFAULT_MODAL_LAUNCH);
     setOpenModal(false);
+  };
+
+  const openNewQuoteModal = (launchConfig = DEFAULT_MODAL_LAUNCH) => {
+    setSelected(null);
+    setPrefillQuote(null);
+    setModalLaunchConfig({ ...DEFAULT_MODAL_LAUNCH, ...launchConfig });
+    setOpenModal(true);
   };
 
   const profitabilityAnalysis = useMemo(
@@ -327,9 +474,7 @@ const Orcamentos = () => {
 
   useEffect(() => {
     if (searchParams.get('new') !== '1') return;
-    setSelected(null);
-    setPrefillQuote(null);
-    setOpenModal(true);
+    openNewQuoteModal();
     const next = new URLSearchParams(searchParams);
     next.delete('new');
     setSearchParams(next, { replace: true });
@@ -437,7 +582,7 @@ const Orcamentos = () => {
         case 'title':
           return compareString((a.title || '').toLowerCase(), (b.title || '').toLowerCase()) * dir;
         case 'total':
-          return (Number(a.totalNumber ?? a.total ?? 0) - Number(b.totalNumber ?? b.total ?? 0)) * dir;
+          return (resolveQuoteTotal(a) - resolveQuoteTotal(b)) * dir;
         case 'status':
           return compareString((a.status || '').toLowerCase(), (b.status || '').toLowerCase()) * dir;
         case 'date':
@@ -706,19 +851,28 @@ const Orcamentos = () => {
       setPreparingEmailPdf(true);
       const { exportQuoteToPDF } = await loadExporters();
       const result = await exportQuoteToPDF(emailDraft.quote, { download: false });
-      const draft = await createQuoteDraft({
+      const trimmedSubject = emailDraft.subject.trim();
+      const trimmedBody = emailDraft.body.trim();
+      const useTemplateHtml = emailDraft.template?.body?.trim() === trimmedBody;
+      await createQuoteDraft({
         to: emailDraft.to.trim(),
-        subject: emailDraft.subject.trim(),
-        body: emailDraft.body.trim(),
-        bodyHtml: buildEmailHtml({
-          subject: emailDraft.subject.trim(),
-          body: emailDraft.body.trim(),
-        }),
+        cc: emailDraft.cc?.trim() || DEFAULT_EMAIL_CC,
+        subject: trimmedSubject,
+        body: trimmedBody,
+        bodyHtml: useTemplateHtml
+          ? buildEmailHtmlFromContent({
+              ...emailDraft.template.content,
+              subject: trimmedSubject,
+            })
+          : buildEmailHtml({
+              subject: trimmedSubject,
+              body: trimmedBody,
+            }),
         pdfBlob: result?.blob,
         pdfFilename: result?.filename,
       });
       try {
-        await navigator.clipboard.writeText(emailDraft.subject.trim());
+        await navigator.clipboard.writeText(trimmedSubject);
       } catch (clipboardError) {
         console.warn('[orcamentos] Falha ao copiar assunto apos criar rascunho', clipboardError);
       }
@@ -726,14 +880,14 @@ const Orcamentos = () => {
         title: 'Rascunho criado',
         message: `O rascunho com anexo foi criado no Outlook. Para achar no app, procure por: ${buildDraftHint(
           emailDraft.quote,
-          emailDraft.subject.trim(),
+          trimmedSubject,
         )}`,
         type: 'success',
         duration: 7000,
       });
       setEmailCreatedNotice({
-        subject: emailDraft.subject.trim(),
-        hint: buildDraftHint(emailDraft.quote, emailDraft.subject.trim()),
+        subject: trimmedSubject,
+        hint: buildDraftHint(emailDraft.quote, trimmedSubject),
       });
       setEmailDraft(null);
     } catch (error) {
@@ -792,11 +946,7 @@ const Orcamentos = () => {
             </button>
             <button
               className="btn-primary"
-              onClick={() => {
-                setSelected(null);
-                setPrefillQuote(null);
-                setOpenModal(true);
-              }}
+              onClick={() => openNewQuoteModal()}
             >
               <Plus className="h-4 w-4" />
               Novo orçamento
@@ -859,14 +1009,16 @@ const Orcamentos = () => {
                 ))}
               </select>
             </div>
-            <div className="flex w-full max-w-xs items-center gap-2">
-              <input
-                placeholder="Buscar por PO, empresa, contato..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                data-global-search
-                className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-1 text-xs text-white outline-none focus:border-primary/50 sm:py-1.5 sm:text-[11px]"
-              />
+            <div className="flex w-full min-w-[20rem] flex-1 items-center gap-2">
+              <div className="min-w-[9rem] flex-1">
+                <input
+                  placeholder="Buscar por PO, empresa, contato..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  data-global-search
+                  className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-1 text-xs text-white outline-none focus:border-primary/50 sm:py-1.5 sm:text-[11px]"
+                />
+              </div>
               <button
                 className="rounded-lg border border-white/10 p-2 text-slate-200 hover:border-primary/40 hover:text-white"
                 type="button"
@@ -886,6 +1038,20 @@ const Orcamentos = () => {
                   className="gap-1 flex-nowrap items-center"
                 />
               </Suspense>
+              <button
+                type="button"
+                className="inline-flex items-center gap-2 whitespace-nowrap rounded-xl border border-amber-300/25 bg-amber-500/10 px-3 py-1 text-[11px] font-semibold text-amber-50 transition hover:border-amber-300/45 hover:bg-amber-500/15 sm:py-1.5"
+                onClick={() =>
+                  openNewQuoteModal({
+                    initialActiveTab: 'lista-ia',
+                    initialActiveStep: 'itens',
+                  })
+                }
+                title="Criar orçamento por lista com IA"
+              >
+                <Sparkles className="h-4 w-4" />
+                Lista IA
+              </button>
             </div>
           </div>
         </div>
@@ -899,11 +1065,7 @@ const Orcamentos = () => {
             </button>
             <button
               className="btn-primary"
-              onClick={() => {
-                setSelected(null);
-                setPrefillQuote(null);
-                setOpenModal(true);
-              }}
+              onClick={() => openNewQuoteModal()}
             >
               Criar novo orçamento
             </button>
@@ -920,11 +1082,13 @@ const Orcamentos = () => {
           onEdit={(quote) => {
             setPrefillQuote(null);
             setSelected(quote);
+            setModalLaunchConfig(DEFAULT_MODAL_LAUNCH);
             setOpenModal(true);
           }}
           onDuplicate={(quote) => {
             setSelected(null);
             setPrefillQuote(quote);
+            setModalLaunchConfig(DEFAULT_MODAL_LAUNCH);
             setOpenModal(true);
           }}
           onEmail={openEmailComposer}
@@ -1025,12 +1189,14 @@ const Orcamentos = () => {
           <QuoteModal
             open={openModal}
             onClose={modalClose}
-            onSave={handleSave}
-            quote={selected}
-            initialQuote={prefillQuote}
-            materials={materiais.products}
-            services={servicos.products}
-            loadingCatalog={loadingCatalog}
+          onSave={handleSave}
+          quote={selected}
+          initialQuote={prefillQuote}
+          initialActiveTab={modalLaunchConfig.initialActiveTab}
+          initialActiveStep={modalLaunchConfig.initialActiveStep}
+          materials={materiais.products}
+          services={servicos.products}
+          loadingCatalog={loadingCatalog}
             onRefreshCatalog={refreshCatalog}
             clients={clientOptions}
           />
@@ -1038,7 +1204,8 @@ const Orcamentos = () => {
       ) : null}
 
       {approvalConfirm && (
-        <div
+        <ModalPortal>
+          <div
           className="cyber-overlay fixed inset-0 z-40 flex items-center justify-center bg-black/70 px-4"
           onMouseDown={(event) => {
             if (event.target !== event.currentTarget || updatingApproval) return;
@@ -1069,11 +1236,13 @@ const Orcamentos = () => {
               </button>
             </div>
           </div>
-        </div>
+          </div>
+        </ModalPortal>
       )}
 
       {confirmQuote && (
-        <div
+        <ModalPortal>
+          <div
           className="cyber-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4"
           onMouseDown={(event) => {
             if (event.target !== event.currentTarget || deleting) return;
@@ -1102,129 +1271,165 @@ const Orcamentos = () => {
               </button>
             </div>
           </div>
-        </div>
+          </div>
+        </ModalPortal>
       )}
 
-      {emailDraft && (
-        <div
-          className="cyber-overlay fixed inset-0 z-50 overflow-y-auto bg-black/70 px-4 py-6"
-          onMouseDown={(event) => {
-            if (event.target !== event.currentTarget || preparingEmailPdf) return;
-            setEmailDraft(null);
-          }}
-        >
+      {emailDraft &&
+        typeof document !== 'undefined' &&
+        createPortal(
           <div
-            className="cyber-dialog mx-auto w-full max-w-lg rounded-2xl border border-white/10 bg-slate-900 p-3 shadow-2xl sm:p-4"
-            onMouseDown={(event) => event.stopPropagation()}
+            className="cyber-overlay fixed inset-0 z-[74] flex items-center justify-center bg-black/70 px-4 py-6"
+            onMouseDown={(event) => {
+              if (event.target !== event.currentTarget || preparingEmailPdf) return;
+              setEmailDraft(null);
+            }}
           >
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="text-[11px] uppercase tracking-wide text-slate-400">E-mail sugerido</p>
-                <h3 className="text-sm font-semibold text-white sm:text-base">
-                  {emailDraft.quote?.clientCompany || emailDraft.quote?.clientName || 'Cliente'}
-                </h3>
-                <p className="text-[11px] text-slate-400 sm:text-xs">
-                  {emailDraft.quote?.poNumber ? `PO ${emailDraft.quote.poNumber}` : 'PO pendente'} ·{' '}
-                  {formatCurrency(emailDraft.quote?.totalNumber ?? emailDraft.quote?.total ?? 0)}
-                </p>
-                <p className="mt-1 text-[11px] text-slate-500">
-                  Revise o conteúdo abaixo. O e-mail com anexo abrirá no browser.
-                </p>
+            <div
+              className="cyber-dialog w-full max-w-6xl rounded-2xl border border-white/10 bg-slate-900 p-3 shadow-2xl sm:p-4"
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] uppercase tracking-wide text-slate-400">E-mail sugerido</p>
+                  <h3 className="text-sm font-semibold text-white sm:text-base">
+                    {emailDraft.quote?.clientCompany || emailDraft.quote?.clientName || 'Cliente'}
+                  </h3>
+                  <p className="text-[11px] text-slate-400 sm:text-xs">
+                    {emailDraft.quote?.poNumber ? `PO ${emailDraft.quote.poNumber}` : 'PO pendente'} ·{' '}
+                    {formatCurrency(resolveQuoteTotal(emailDraft.quote))}
+                  </p>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Revise o conteúdo abaixo. O e-mail com anexo abrirá no browser.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEmailDraft(null)}
+                  className="rounded-lg border border-white/10 px-2.5 py-1.5 text-[11px] text-slate-200 transition hover:border-primary/50 hover:text-white"
+                >
+                  Fechar
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setEmailDraft(null)}
-                className="rounded-lg border border-white/10 px-2.5 py-1.5 text-[11px] text-slate-200 transition hover:border-primary/50 hover:text-white"
-              >
-                Fechar
-              </button>
+
+              <div className="mt-3 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
+                <div className="grid gap-2">
+                  <label className="block text-[11px] font-semibold text-slate-300 sm:text-xs">
+                    Destinatário
+                    <input
+                      value={emailDraft.to}
+                      onChange={(e) => setEmailDraft((prev) => ({ ...prev, to: e.target.value }))}
+                      className="mt-1 w-full rounded-xl border border-white/15 bg-slate-900 px-3 py-2 text-[13px] text-white outline-none focus:border-primary/60"
+                      placeholder="cliente@empresa.com"
+                    />
+                  </label>
+
+                  <label className="block text-[11px] font-semibold text-slate-300 sm:text-xs">
+                    Cópia
+                    <input
+                      value={emailDraft.cc || DEFAULT_EMAIL_CC}
+                      readOnly
+                      className="mt-1 w-full rounded-xl border border-white/10 bg-slate-950/80 px-3 py-2 text-[13px] text-slate-300 outline-none"
+                    />
+                  </label>
+
+                  <label className="block text-[11px] font-semibold text-slate-300 sm:text-xs">
+                    Assunto
+                    <input
+                      value={emailDraft.subject}
+                      onChange={(e) => setEmailDraft((prev) => ({ ...prev, subject: e.target.value }))}
+                      className="mt-1 w-full rounded-xl border border-white/15 bg-slate-900 px-3 py-2 text-[13px] text-white outline-none focus:border-primary/60"
+                    />
+                  </label>
+
+                  <label className="block text-[11px] font-semibold text-slate-300 sm:text-xs">
+                    Corpo do e-mail
+                    <textarea
+                      value={emailDraft.body}
+                      onChange={(e) => setEmailDraft((prev) => ({ ...prev, body: e.target.value }))}
+                      rows={10}
+                      className="mt-1 max-h-[38vh] min-h-[15rem] w-full rounded-xl border border-white/15 bg-slate-900 px-3 py-2 text-[13px] text-white outline-none focus:border-primary/60"
+                    />
+                  </label>
+
+                  <div className="mt-1 flex flex-wrap items-center justify-end gap-1.5">
+                    <button
+                      type="button"
+                      className="btn-secondary min-w-[8.5rem] justify-center !rounded-lg !px-3 !py-2 !text-[12px]"
+                      onClick={copyEmailBody}
+                    >
+                      <Copy className="h-4 w-4" />
+                      Copiar texto
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn-primary min-w-[11.25rem] justify-center !rounded-lg !border-amber-300/25 !bg-[linear-gradient(135deg,#7a5417,#c99c4c)] !px-3 !py-2 !text-[12px] !text-[#120d06] hover:!shadow-amber-500/20 ${preparingEmailPdf ? 'cursor-not-allowed opacity-70' : ''}`}
+                      onClick={openEmailWithAttachment}
+                      disabled={preparingEmailPdf}
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                      {preparingEmailPdf ? 'Criando rascunho...' : 'Crie e-mail com anexo'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="min-h-0">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Prévia HTML</p>
+                      <p className="text-[11px] text-slate-500">Visual aproximado de como o rascunho será criado no Outlook.</p>
+                    </div>
+                  </div>
+                  <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/70">
+                    <iframe
+                      title="Prévia do e-mail"
+                      sandbox=""
+                      srcDoc={buildEmailPreviewHtml(emailDraft)}
+                      className="h-[28rem] w-full bg-white"
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
+          </div>,
+          document.body,
+        )}
 
-            <div className="mt-3 grid gap-2">
-              <label className="block text-[11px] font-semibold text-slate-300 sm:text-xs">
-                Destinatário
-                <input
-                  value={emailDraft.to}
-                  onChange={(e) => setEmailDraft((prev) => ({ ...prev, to: e.target.value }))}
-                  className="mt-1 w-full rounded-xl border border-white/15 bg-slate-900 px-3 py-2 text-[13px] text-white outline-none focus:border-primary/60"
-                  placeholder="cliente@empresa.com"
-                />
-              </label>
-
-              <label className="block text-[11px] font-semibold text-slate-300 sm:text-xs">
-                Assunto
-                <input
-                  value={emailDraft.subject}
-                  onChange={(e) => setEmailDraft((prev) => ({ ...prev, subject: e.target.value }))}
-                  className="mt-1 w-full rounded-xl border border-white/15 bg-slate-900 px-3 py-2 text-[13px] text-white outline-none focus:border-primary/60"
-                />
-              </label>
-
-              <label className="block text-[11px] font-semibold text-slate-300 sm:text-xs">
-                Corpo do e-mail
-                <textarea
-                  value={emailDraft.body}
-                  onChange={(e) => setEmailDraft((prev) => ({ ...prev, body: e.target.value }))}
-                  rows={9}
-                  className="mt-1 max-h-[40vh] min-h-[15rem] w-full rounded-xl border border-white/15 bg-slate-900 px-3 py-2 text-[13px] text-white outline-none focus:border-primary/60"
-                />
-              </label>
-            </div>
-
-            <div className="mt-3 flex flex-wrap items-center justify-end gap-1.5">
-              <button
-                type="button"
-                className="btn-secondary min-w-[9rem] justify-center !rounded-lg !px-3 !py-2 !text-[12px]"
-                onClick={copyEmailBody}
-              >
-                <Copy className="h-4 w-4" />
-                Copiar texto
-              </button>
-              <button
-                type="button"
-                className={`btn-primary min-w-[12rem] justify-center !rounded-lg !border-amber-300/25 !bg-[linear-gradient(135deg,#7a5417,#c99c4c)] !px-3 !py-2 !text-[12px] !text-[#120d06] hover:!shadow-amber-500/20 ${preparingEmailPdf ? 'cursor-not-allowed opacity-70' : ''}`}
-                onClick={openEmailWithAttachment}
-                disabled={preparingEmailPdf}
-              >
-                <ExternalLink className="h-4 w-4" />
-                {preparingEmailPdf ? 'Criando rascunho...' : 'Crie e-mail com anexo'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {emailCreatedNotice && (
-        <div
-          className="cyber-overlay fixed inset-0 z-[55] flex items-center justify-center bg-black/70 px-4"
-          onMouseDown={(event) => {
-            if (event.target !== event.currentTarget) return;
-            setEmailCreatedNotice(null);
-          }}
-        >
+      {emailCreatedNotice &&
+        typeof document !== 'undefined' &&
+        createPortal(
           <div
-            className="cyber-dialog w-full max-w-md rounded-2xl border border-white/10 bg-slate-900 p-4 shadow-2xl sm:p-5"
-            onMouseDown={(event) => event.stopPropagation()}
+            className="cyber-overlay fixed inset-0 z-[75] flex items-center justify-center bg-black/70 px-4"
+            onMouseDown={(event) => {
+              if (event.target !== event.currentTarget) return;
+              setEmailCreatedNotice(null);
+            }}
           >
-            <p className="text-[11px] uppercase tracking-wide text-amber-200">E-mail criado</p>
-            <p className="mt-2 text-sm text-slate-300">
-              O rascunho foi criado com sucesso e já está disponível na pasta <span className="font-semibold text-white">Rascunho</span>.
-            </p>
-            <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-500/10 p-3">
-              <p className="text-[11px] uppercase tracking-wide text-amber-100">Assunto</p>
-              <p className="mt-1 text-sm font-semibold text-white">{emailCreatedNotice.subject}</p>
+            <div
+              className="cyber-dialog w-full max-w-md rounded-2xl border border-white/10 bg-slate-900 p-4 shadow-2xl sm:p-5"
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              <p className="text-[11px] uppercase tracking-wide text-amber-200">E-mail criado</p>
+              <p className="mt-2 text-sm text-slate-300">
+                O rascunho foi criado com sucesso e já está disponível na pasta <span className="font-semibold text-white">Rascunho</span>.
+              </p>
+              <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-500/10 p-3">
+                <p className="text-[11px] uppercase tracking-wide text-amber-100">Assunto</p>
+                <p className="mt-1 text-sm font-semibold text-white">{emailCreatedNotice.subject}</p>
+              </div>
+              <div className="mt-4 flex justify-end gap-2">
+                <button className="btn-primary" onClick={() => setEmailCreatedNotice(null)}>
+                  Entendi
+                </button>
+              </div>
             </div>
-            <div className="mt-4 flex justify-end gap-2">
-              <button className="btn-primary" onClick={() => setEmailCreatedNotice(null)}>
-                Entendi
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body,
+        )}
 
       {profitabilityQuote && profitabilityAnalysis && (
-        <div
+        <ModalPortal>
+          <div
           className="cyber-overlay fixed inset-0 z-[56] overflow-y-auto bg-black/70 px-4 py-6"
           onMouseDown={(event) => {
             if (event.target !== event.currentTarget) return;
@@ -1417,11 +1622,13 @@ const Orcamentos = () => {
               </button>
             </div>
           </div>
-        </div>
+          </div>
+        </ModalPortal>
       )}
 
       {profitabilityDetail && (
-        <div
+        <ModalPortal>
+          <div
           className="cyber-overlay fixed inset-0 z-[57] flex items-center justify-center bg-black/70 px-4"
           onMouseDown={(event) => {
             if (event.target !== event.currentTarget) return;
@@ -1488,11 +1695,13 @@ const Orcamentos = () => {
               </button>
             </div>
           </div>
-        </div>
+          </div>
+        </ModalPortal>
       )}
 
       {deleting && (
-        <div className="cyber-overlay fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/70 px-4 backdrop-blur-sm">
+        <ModalPortal>
+          <div className="cyber-overlay fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/70 px-4 backdrop-blur-sm">
           <div className="cyber-dialog cyber-loading-dialog flex w-full max-w-sm flex-col items-center gap-4 rounded-2xl border border-white/15 bg-white/5 p-6 text-center shadow-2xl">
             <div className="relative flex h-24 w-24 items-center justify-center">
               <div className="absolute h-24 w-24 animate-spin rounded-full border-2 border-primary/40 border-t-transparent" />
@@ -1504,7 +1713,8 @@ const Orcamentos = () => {
               <p className="text-xs text-slate-300">Aguarde alguns instantes.</p>
             </div>
           </div>
-        </div>
+          </div>
+        </ModalPortal>
       )}
     </div>
   );

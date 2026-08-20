@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, ChevronLeft, ChevronRight, Pencil, Plus, RefreshCw, Trash2, Users, X } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, CircleHelp, Maximize2, Pencil, Plus, RefreshCw, Sparkles, Trash2, Users, X } from 'lucide-react';
 import { computeQuoteTotals } from '../services/quotes.js';
 import { getEmployees } from '../services/employees.js';
+import { getResolvedProductServiceReference } from '../services/api.js';
 import { formatCurrency } from '../utils/formatters.js';
+import { buildImportPreview } from '../utils/quoteImporter.js';
 import { getCurrentUser } from '../utils/userSession.js';
 import { useToast } from './ToastHost.jsx';
 
@@ -37,6 +39,44 @@ const defaultQuote = {
   updatedAt: '',
 };
 
+const createDefaultManualForm = () => ({
+  name: '',
+  sku: '',
+  category: '',
+  unit: 'Un',
+  price: '0',
+  realCost: '',
+  quantity: 1,
+  type: 'materiais',
+  source: 'manual',
+});
+
+const manualFormSnapshot = (value = {}) =>
+  JSON.stringify({
+    name: value.name || '',
+    sku: value.sku || '',
+    category: value.category || '',
+    unit: value.unit || '',
+    price: value.price?.toString() || '',
+    realCost: value.realCost?.toString() || '',
+    quantity: Number(value.quantity || 1),
+    type: value.type || 'materiais',
+    source: value.source || 'manual',
+  });
+
+const laborFormSnapshot = (value = {}) =>
+  JSON.stringify(
+    Object.keys(value)
+      .sort()
+      .reduce((acc, key) => {
+        acc[key] = {
+          quantity: `${value[key]?.quantity ?? ''}`,
+          rate: `${value[key]?.rate ?? ''}`,
+        };
+        return acc;
+      }, {}),
+  );
+
 const CATEGORY_OPTIONS = [
   'Cabeamento Estruturado',
   'Ciber Seguran\u00e7a',
@@ -45,6 +85,195 @@ const CATEGORY_OPTIONS = [
   'Sistema - CFTV',
   'Telecom',
 ];
+
+const CATEGORY_SCOPE_STORAGE_KEY = 'crm-orcamentos:category-scope-templates';
+const DEFAULT_CATEGORY_SCOPES = {
+  'Cabeamento Estruturado': 'Execucao de infraestrutura de cabeamento estruturado, observando as boas praticas de instalacao, organizacao e identificacao dos pontos.',
+  'Ciber Seguranca': 'Implantacao e configuracao da solucao de ciberseguranca definida para o ambiente, com validacao dos controles aplicados.',
+  'Infraestrutura Fibra Optica': 'Execucao da infraestrutura de conectividade em fibra optica, incluindo acomodacao, identificacao e validacao dos enlaces.',
+  'Sistema Audiovisuais': 'Implantacao e configuracao do sistema audiovisual, incluindo interligacao e validacao funcional dos equipamentos.',
+  'Sistema - CFTV': 'Implantacao e configuracao do sistema de CFTV e monitoramento, com posicionamento e validacao dos recursos previstos.',
+  Telecom: 'Execucao e organizacao da infraestrutura de telecomunicacoes, com identificacao e validacao dos recursos instalados.',
+};
+
+const readCategoryScopeTemplates = () => {
+  if (typeof window === 'undefined') return { ...DEFAULT_CATEGORY_SCOPES };
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(CATEGORY_SCOPE_STORAGE_KEY) || '{}');
+    return { ...DEFAULT_CATEGORY_SCOPES, ...stored };
+  } catch {
+    return { ...DEFAULT_CATEGORY_SCOPES };
+  }
+};
+
+const normalizeScopeText = (value) =>
+  (value || '')
+    .toString()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase();
+
+const splitServiceName = (name) => {
+  const [service, ...locationParts] = (name || '').toString().split(/\s+-\s+/);
+  return { service: service.trim(), location: locationParts.join(' - ').trim() };
+};
+
+const formatServiceQuantity = (item) => {
+  const quantity = Number(item?.quantity || 0);
+  const rawUnit = (item?.unit || '').toString().trim();
+  const normalizedUnit = normalizeScopeText(rawUnit);
+  const unit = normalizedUnit === 'm' ? 'm' : normalizedUnit.startsWith('un') ? 'un.' : rawUnit.toLowerCase();
+  return quantity > 0 ? `${quantity}${unit ? ` ${unit}` : ''}` : '';
+};
+
+const formatServiceLocation = (location) => {
+  if (!location) return '';
+  return /^(area|setor|andar|pavimento|sala)\b/.test(normalizeScopeText(location))
+    ? ` na ${location}`
+    : ` em ${location}`;
+};
+
+const cleanServiceSubject = (service) =>
+  service
+    .replace(/^(instala[cç][aã]o|fixa[cç][aã]o|montagem)\s+(de|do|da|dos|das)?\s*/i, '')
+    .replace(/^(servico\s+de)\s*/i, '')
+    .trim()
+    .toLowerCase();
+
+const buildInstallationScope = (item) => {
+  const { service, location } = splitServiceName(item?.name || item?.description || '');
+  const normalized = normalizeScopeText(service);
+  const quantity = formatServiceQuantity(item);
+  const amount = quantity ? `${quantity} de ` : '';
+  const place = formatServiceLocation(location);
+
+  if (/kit.*fixacao|fixacao.*poste/.test(normalized)) {
+    return `Fixação de ${amount}kits em poste${place}, garantindo sustentação adequada, estabilidade mecânica e organização da infraestrutura instalada.`;
+  }
+  if (/patch\s*cord/.test(normalized)) {
+    return `Instalação de ${amount}patch cords${place} para interligação dos equipamentos, com acomodação organizada e conferência da conectividade.`;
+  }
+  if (/conversor.*(midia|media)|media\s*converter/.test(normalized)) {
+    return `Integração de ${amount}conversores de mídia${place}, incluindo conexão aos enlaces ópticos e metálicos, energização e teste de comunicação.`;
+  }
+  if (/\bdio\b|distribuidor.*optico/.test(normalized)) {
+    return `Instalação de ${amount}distribuidores internos ópticos (DIO)${place}, com fixação, acomodação das fibras, identificação e preparação para as terminações.`;
+  }
+  if (/rack|bracket|gabinete/.test(normalized)) {
+    return `Montagem de ${amount}racks ou gabinetes de telecomunicações${place}, contemplando fixação, organização dos componentes e acomodação do cabeamento.`;
+  }
+  if (/vbox|caixa.*cftv|caixa.*camera/.test(normalized)) {
+    return `Instalação de ${amount}caixas de proteção VBOX${place}, destinadas ao acondicionamento das conexões e fontes do sistema de CFTV, com fixação segura, organização interna e vedação adequada.`;
+  }
+  if (/camera/.test(normalized)) {
+    return `Fixação de ${amount}câmeras de CFTV${place}, incluindo posicionamento, conexão, ajuste do campo de visão e validação da imagem.`;
+  }
+  if (/cftv/.test(normalized)) {
+    const subject = cleanServiceSubject(service || 'componentes do sistema de CFTV');
+    return `Instalação de ${amount}${subject}${place}, com fixação, interligação ao sistema e testes funcionais de operação.`;
+  }
+  if (/tomada|espelho|keystone|ponto.*rede/.test(normalized)) {
+    return `Montagem de ${amount}pontos de telecomunicações${place}, incluindo fixação dos componentes, terminação, identificação e teste de continuidade.`;
+  }
+
+  const subject = cleanServiceSubject(service || 'equipamentos previstos');
+  return `Instalação de ${amount}${subject}${place}, contemplando fixação, interligação, organização e testes funcionais após a montagem.`;
+};
+
+const buildConfigurationScope = (item) => {
+  const { service, location } = splitServiceName(item?.name || item?.description || '');
+  const quantity = formatServiceQuantity(item);
+  const subject = cleanServiceSubject(service || 'solução prevista');
+  return `Configuração de ${quantity ? `${quantity} de ` : ''}${subject}${formatServiceLocation(location)}, com parametrização, integração e validação operacional.`;
+};
+
+const buildComplementaryServiceScope = (item) => {
+  const { service, location } = splitServiceName(item?.name || item?.description || '');
+  const quantity = formatServiceQuantity(item);
+  const subject = cleanServiceSubject(service || 'atividade técnica prevista');
+  return `Execução de ${quantity ? `${quantity} de ` : ''}${subject}${formatServiceLocation(location)}, seguindo as boas práticas técnicas e com verificação do resultado ao término da atividade.`;
+};
+
+const renderServiceScopeTemplate = (item) => {
+  const template = (item?.scopeTemplate || '').toString().trim();
+  if (!template) return '';
+  const { service, location } = splitServiceName(item?.name || item?.description || '');
+  const quantity = Number(item?.quantity || 0);
+  const unit = (item?.unit || '').toString().trim();
+  return template
+    .replaceAll('{quantidade}', quantity > 0 ? String(quantity) : '')
+    .replaceAll('{unidade}', unit)
+    .replaceAll('{local}', location)
+    .replaceAll('{servico}', service)
+    .replaceAll('{categoria}', item?.category || '')
+    .replace(/[ \t]+([,.;:])/g, '$1')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+};
+
+const buildAutomaticScope = (category, items = [], categoryScopes = DEFAULT_CATEGORY_SCOPES) => {
+  const safeCategory = (category || '').toString().trim();
+  if (!safeCategory) return '';
+  const baseScope = (categoryScopes[safeCategory] || `Execucao dos servicos relacionados a ${safeCategory}.`).trim();
+  const services = (items || []).filter((item) => {
+    if (item?.type !== 'servicos' || LABOR_ITEM_IDS.has(item?.id)) return false;
+    return !/diaria|acompanhamento/.test(normalizeScopeText(item?.name));
+  });
+  const sections = [baseScope];
+
+  const installationItems = [];
+  const configurationItems = [];
+  const otherItems = [];
+
+  services.forEach((item) => {
+    const catalogTemplateScope = renderServiceScopeTemplate(item);
+    if (catalogTemplateScope) {
+      sections.push(catalogTemplateScope);
+      return;
+    }
+    const { service, location } = splitServiceName(item?.name || item?.description || '');
+    const normalized = normalizeScopeText(service);
+    const quantity = formatServiceQuantity(item);
+    const place = formatServiceLocation(location);
+
+    if (/lancamento|passagem/.test(normalized) && /cabo.*(rede|dados)|utp|ftp|cat\s*[5-8]/.test(normalized)) {
+      sections.push(`Lancamento de ${quantity || 'cabos'} de cabeamento de rede${place}, com acomodacao, identificacao das extremidades e preparacao dos enlaces.`);
+      return;
+    }
+    if (/lancamento|passagem/.test(normalized) && /fibra|optico|optica/.test(normalized)) {
+      sections.push(`Lancamento de ${quantity || 'cabo'} de cabo optico${place}, com acomodacao adequada, identificacao das extremidades e preservacao do raio de curvatura.`);
+      return;
+    }
+    if (/fusao|emenda/.test(normalized) && /fibra|optico|optica/.test(normalized)) {
+      sections.push(`Fusao de ${quantity || 'fibras opticas'}${place}, incluindo preparacao, acomodacao, identificacao e verificacao do enlace.`);
+      return;
+    }
+    if (/certificacao|teste/.test(normalized) && /rede|cabo|ponto/.test(normalized)) {
+      sections.push(`Certificacao de ${quantity || 'pontos de rede'}${place}, com validacao dos enlaces e registro dos resultados.`);
+      return;
+    }
+    if (/instalacao|fixacao|montagem/.test(normalized)) {
+      installationItems.push(buildInstallationScope(item));
+      return;
+    }
+    if (/configuracao|programacao|ativacao/.test(normalized)) {
+      configurationItems.push(buildConfigurationScope(item));
+      return;
+    }
+    otherItems.push(buildComplementaryServiceScope(item));
+  });
+
+  if (installationItems.length) {
+    sections.push(...installationItems);
+  }
+  if (configurationItems.length) {
+    sections.push(...configurationItems);
+  }
+  if (otherItems.length) {
+    sections.push(...otherItems);
+  }
+  return sections.join('\n\n');
+};
 
 const LABOR_OPTIONS = [
   {
@@ -83,6 +312,42 @@ const LABOR_OPTIONS = [
 
 const LABOR_ITEM_IDS = new Set(LABOR_OPTIONS.map((option) => option.id));
 const QUOTE_DRAFT_STORAGE_PREFIX = 'crm-orcamentos:quote-draft';
+const getQuoteItemKey = (item) => `${item?.type || 'item'}::${item?.id || ''}`;
+const isManualQuoteItem = (item) => item?.source === 'manual' || `${item?.id || ''}`.startsWith('manual-');
+const buildCatalogQuoteItem = (product, quantity, typeOverride, source = 'catalog') => ({
+  id: product.id,
+  name: product.name,
+  sku: product.sku,
+  category: product.category || '',
+  price: Number(product.price || 0),
+  quantity: Number(quantity || 1),
+  unit: product.unit || '',
+  type: typeOverride || product.type || 'materiais',
+  source,
+  scopeTemplate: product.scopeTemplate || '',
+});
+const mergeQuoteItems = (currentItems = [], incomingItems = []) => {
+  const items = currentItems.map((item) => ({ ...item }));
+  incomingItems.forEach((incomingItem) => {
+    const matchIndex = items.findIndex(
+      (item) => item.id === incomingItem.id && (item.type || 'materiais') === (incomingItem.type || 'materiais'),
+    );
+
+    if (matchIndex === -1) {
+      items.push({ ...incomingItem });
+      return;
+    }
+
+    items[matchIndex] = {
+      ...items[matchIndex],
+      quantity: Number(items[matchIndex].quantity || 0) + Number(incomingItem.quantity || 0),
+      unit: items[matchIndex].unit || incomingItem.unit || '',
+      category: items[matchIndex].category || incomingItem.category || '',
+      source: items[matchIndex].source || incomingItem.source || 'catalog',
+    };
+  });
+  return items;
+};
 const sanitizeDraftForm = (value) => {
   const items = Array.isArray(value?.items) ? value.items.map((item) => ({ ...item })) : [];
   return {
@@ -162,6 +427,8 @@ const QuoteModal = ({
   onSave,
   quote,
   initialQuote,
+  initialActiveTab = 'materiais',
+  initialActiveStep = 'cliente',
   materials = [],
   services = [],
   loadingCatalog = false,
@@ -176,30 +443,35 @@ const QuoteModal = ({
   const [categoryOptions, setCategoryOptions] = useState([]);
   const [selectedClientId, setSelectedClientId] = useState('');
   const [clientDebug, setClientDebug] = useState('');
-  const [manualForm, setManualForm] = useState({
-    name: '',
-    sku: '',
-    category: '',
-    unit: 'Un',
-    price: '0',
-    realCost: '',
-    quantity: 1,
-    type: 'materiais',
-  });
+  const [manualForm, setManualForm] = useState(createDefaultManualForm);
   const [manualError, setManualError] = useState('');
-  const [editingManualId, setEditingManualId] = useState(null);
+  const [importText, setImportText] = useState('');
+  const [importPreview, setImportPreview] = useState([]);
+  const [importSummary, setImportSummary] = useState(null);
+  const [importError, setImportError] = useState('');
+  const [editingItemKey, setEditingItemKey] = useState(null);
   const [employees, setEmployees] = useState([]);
   const [employeesError, setEmployeesError] = useState('');
   const [laborModalOpen, setLaborModalOpen] = useState(false);
+  const [scopeHelpOpen, setScopeHelpOpen] = useState(false);
+  const [assumptionsOpen, setAssumptionsOpen] = useState(false);
+  const [scopeTemplateCategory, setScopeTemplateCategory] = useState(CATEGORY_OPTIONS[0]);
+  const [categoryScopes, setCategoryScopes] = useState(readCategoryScopeTemplates);
   const [laborForm, setLaborForm] = useState({});
+  const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
   const [showValidation, setShowValidation] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [draftMeta, setDraftMeta] = useState(null);
   const [hideFloatingTotal, setHideFloatingTotal] = useState(false);
   const savingRef = useRef(false);
+  const automaticScopeRef = useRef('');
   const draftBaseSnapshotRef = useRef('');
+  const sessionSnapshotRef = useRef(draftSnapshot(defaultQuote));
+  const manualFormBaseRef = useRef(manualFormSnapshot(createDefaultManualForm()));
+  const laborFormBaseRef = useRef(laborFormSnapshot({}));
   const scrollContainerRef = useRef(null);
   const manualEditorRef = useRef(null);
+  const importSectionRef = useRef(null);
   const clientSectionRef = useRef(null);
   const itemsSectionRef = useRef(null);
   const valuesSectionRef = useRef(null);
@@ -262,14 +534,14 @@ const QuoteModal = ({
       .trim()
       .toLowerCase();
 
-  const findClientByValue = (value) => {
+  const findClientByValue = useCallback((value) => {
     const norm = normalizeValue(value);
     return (
       clients.find((c) => normalizeValue(c.id) === norm) ||
       clients.find((c) => normalizeValue(c.company) === norm) ||
       clients.find((c) => normalizeValue(c.name) === norm)
     );
-  };
+  }, [clients]);
 
   useEffect(() => {
     const baseForm = buildInitialForm(sourceQuote, isEditing);
@@ -277,29 +549,36 @@ const QuoteModal = ({
     const restoredDraft = open && draftKey ? readQuoteDraft(draftKey) : null;
     const nextForm = restoredDraft?.data ? { ...baseForm, ...restoredDraft.data } : baseForm;
 
+    // Novos orcamentos e rascunhos recuperados continuam com o escopo em modo
+    // automatico. Em orcamentos existentes, um escopo salvo e tratado como
+    // texto manual para evitar sobrescrever uma proposta ja personalizada.
+    automaticScopeRef.current = isEditing && nextForm.scope?.trim() ? null : nextForm.scope || '';
+
     setForm(nextForm);
-    setActiveTab('materiais');
+    sessionSnapshotRef.current = draftSnapshot(nextForm);
+    setActiveTab(initialActiveTab || 'materiais');
     setSearch('');
     setQuantities({});
     setSelectedClientId(
       nextForm.clientId || nextForm.clientCompany || nextForm.clientName || sourceQuote?.clientId || sourceQuote?.clientCompany || sourceQuote?.clientName || '',
     );
     setLaborModalOpen(false);
+    setScopeHelpOpen(false);
+    setAssumptionsOpen(false);
     setLaborForm({});
-    setActiveStep('cliente');
+    laborFormBaseRef.current = laborFormSnapshot({});
+    setActiveStep(initialActiveStep || 'cliente');
     setShowValidation(false);
-    setManualForm({
-      name: '',
-      sku: '',
-      category: '',
-      unit: 'Un',
-      price: '0',
-      realCost: '',
-      quantity: 1,
-      type: 'materiais',
-    });
+    const emptyManualForm = createDefaultManualForm();
+    setManualForm(emptyManualForm);
+    manualFormBaseRef.current = manualFormSnapshot(emptyManualForm);
     setManualError('');
-    setEditingManualId(null);
+    setImportText('');
+    setImportPreview([]);
+    setImportSummary(null);
+    setImportError('');
+    setEditingItemKey(null);
+    setCloseConfirmOpen(false);
     setDraftMeta(
       draftKey
         ? {
@@ -319,7 +598,7 @@ const QuoteModal = ({
         duration: 5000,
       });
     }
-  }, [draftKey, isEditing, open, pushToast, sourceQuote]);
+  }, [draftKey, initialActiveStep, initialActiveTab, isEditing, open, pushToast, sourceQuote]);
 
   useEffect(() => {
     if (!open || !draftKey || isSaving) return;
@@ -382,21 +661,10 @@ const QuoteModal = ({
   }, [activeTab, open]);
 
   useEffect(() => {
-    if (!open) return;
-    const handleKeydown = (event) => {
-      if (event.key !== 'Escape') return;
-      if (isSaving) return;
-      if (laborModalOpen) {
-        closeLaborModal();
-      } else {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeydown);
-    return () => window.removeEventListener('keydown', handleKeydown);
-  }, [open, isSaving, laborModalOpen, onClose]);
-
-  useEffect(() => {
+    if (activeTab !== 'materiais' && activeTab !== 'servicos') {
+      setCategoryOptions([]);
+      return;
+    }
     const sourceList = activeTab === 'materiais' ? materials : services;
     const allCategories = sourceList
       .map((item) => item.category)
@@ -406,10 +674,14 @@ const QuoteModal = ({
     setCategoryOptions(unique);
   }, [materials, services, activeTab]);
 
-  const list = activeTab === 'materiais' ? materials : activeTab === 'servicos' ? services : [];
+  const list = useMemo(() => {
+    if (activeTab === 'materiais') return materials;
+    if (activeTab === 'servicos') return services;
+    return [];
+  }, [activeTab, materials, services]);
 
   const filteredList = useMemo(() => {
-    if (activeTab === 'manual') return [];
+    if (activeTab !== 'materiais' && activeTab !== 'servicos') return [];
     const term = normalizeValue(search);
     const category = normalizeValue(form.categoryFilter);
     return list.filter((item) => {
@@ -420,7 +692,7 @@ const QuoteModal = ({
       const matchesCategory = !category || normalizeValue(item.category) === category;
       return matchesTerm && matchesCategory;
     });
-  }, [list, search, form.categoryFilter]);
+  }, [activeTab, list, search, form.categoryFilter]);
 
   // Refaz preenchimento quando o cliente selecionado ou a lista muda (ex: dados carregaram depois do select)
   useEffect(() => {
@@ -441,7 +713,7 @@ const QuoteModal = ({
     } else {
       setClientDebug(`Cliente nao encontrado para ${selectedClientId}`);
     }
-  }, [selectedClientId, clients, isEditing]);
+  }, [clients.length, findClientByValue, isEditing, selectedClientId]);
 
   const totals = useMemo(
     () => computeQuoteTotals(form.items, form.discountValue, form.taxRate),
@@ -453,6 +725,56 @@ const QuoteModal = ({
     return (form.items || []).reduce((acc, item) => acc + item.price * item.quantity, 0) * rate;
   }, [form.items, form.taxRate]);
   const shouldShowFloatingTotal = Number(totals.subtotal || 0) > 0;
+  const currentFormSnapshot = useMemo(() => draftSnapshot(form), [form]);
+  const currentManualFormSnapshot = useMemo(() => manualFormSnapshot(manualForm), [manualForm]);
+  const currentLaborFormSnapshot = useMemo(() => laborFormSnapshot(laborForm), [laborForm]);
+  const hasUnsavedQuoteChanges = currentFormSnapshot !== sessionSnapshotRef.current;
+  const hasPendingManualChanges = currentManualFormSnapshot !== manualFormBaseRef.current;
+  const hasPendingImportChanges = Boolean(importText.trim() || importPreview.length || importSummary);
+  const hasPendingLaborChanges = laborModalOpen && currentLaborFormSnapshot !== laborFormBaseRef.current;
+  const hasPendingAuxChanges = hasPendingManualChanges || hasPendingImportChanges || hasPendingLaborChanges;
+  const hasUnsavedChanges = hasUnsavedQuoteChanges || hasPendingAuxChanges;
+  const canSaveAndCloseFromConfirm = hasUnsavedQuoteChanges && !hasPendingAuxChanges;
+  const requestClose = useCallback(() => {
+    if (isSaving) return;
+    if (hasUnsavedChanges) {
+      setCloseConfirmOpen(true);
+      return;
+    }
+    onClose();
+  }, [hasUnsavedChanges, isSaving, onClose]);
+
+  const closeScopeHelp = () => {
+    setCategoryScopes(readCategoryScopeTemplates());
+    setScopeHelpOpen(false);
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const handleKeydown = (event) => {
+      if (event.key !== 'Escape') return;
+      if (isSaving) return;
+      if (closeConfirmOpen) {
+        setCloseConfirmOpen(false);
+        return;
+      }
+      if (scopeHelpOpen) {
+        closeScopeHelp();
+        return;
+      }
+      if (assumptionsOpen) {
+        setAssumptionsOpen(false);
+        return;
+      }
+      if (laborModalOpen) {
+        closeLaborModal();
+      } else {
+        requestClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeydown);
+    return () => window.removeEventListener('keydown', handleKeydown);
+  }, [open, isSaving, laborModalOpen, closeConfirmOpen, scopeHelpOpen, assumptionsOpen, requestClose]);
 
   const hasClient = Boolean(selectedClientId || form.clientCompany || form.clientName);
   const hasInternalContact = Boolean(form.contactName && form.contactName.trim());
@@ -463,26 +785,29 @@ const QuoteModal = ({
   const hasDeliveryTime = Number(form.deliveryTime || 0) > 0;
   const hasPaymentTerms = Number(form.paymentTerms || 0) > 0;
   const hasValues = Boolean(form.status) && hasValidUntil && hasDeliveryTime && hasPaymentTerms;
-  const canSave = hasClient && hasInternalContact && hasTitle && hasCategory && hasItems && hasValues;
-  const clientRequired = showValidation && !hasClient;
-  const internalContactRequired = showValidation && !hasInternalContact;
-  const titleRequired = showValidation && !hasTitle;
-  const categoryRequired = showValidation && !hasCategory;
-  const validUntilRequired = showValidation && !hasValidUntil;
-  const deliveryTimeRequired = showValidation && !hasDeliveryTime;
-  const paymentTermsRequired = showValidation && !hasPaymentTerms;
+  const isDraftStatus = normalizeValue(form.status || '') === 'rascunho';
+  const canSave = isDraftStatus ? hasItems : hasClient && hasInternalContact && hasTitle && hasCategory && hasItems && hasValues;
+  const clientRequired = showValidation && !isDraftStatus && !hasClient;
+  const internalContactRequired = showValidation && !isDraftStatus && !hasInternalContact;
+  const titleRequired = showValidation && !isDraftStatus && !hasTitle;
+  const categoryRequired = showValidation && !isDraftStatus && !hasCategory;
+  const validUntilRequired = showValidation && !isDraftStatus && !hasValidUntil;
+  const deliveryTimeRequired = showValidation && !isDraftStatus && !hasDeliveryTime;
+  const paymentTermsRequired = showValidation && !isDraftStatus && !hasPaymentTerms;
   const missingFields = useMemo(() => {
     const missing = [];
-    if (!hasClient) missing.push('Cliente');
-    if (!hasInternalContact) missing.push('Contato interno');
-    if (!hasTitle) missing.push('Projeto');
-    if (!hasCategory) missing.push('Categoria');
     if (!hasItems) missing.push('Itens');
-    if (!hasValidUntil) missing.push('Validade');
-    if (!hasDeliveryTime) missing.push('Prazo de entrega');
-    if (!hasPaymentTerms) missing.push('Pagamento');
+    if (!isDraftStatus) {
+      if (!hasClient) missing.push('Cliente');
+      if (!hasInternalContact) missing.push('Contato interno');
+      if (!hasTitle) missing.push('Projeto');
+      if (!hasCategory) missing.push('Categoria');
+      if (!hasValidUntil) missing.push('Validade');
+      if (!hasDeliveryTime) missing.push('Prazo de entrega');
+      if (!hasPaymentTerms) missing.push('Pagamento');
+    }
     return missing;
-  }, [hasCategory, hasClient, hasDeliveryTime, hasInternalContact, hasItems, hasPaymentTerms, hasTitle, hasValidUntil]);
+  }, [hasCategory, hasClient, hasDeliveryTime, hasInternalContact, hasItems, hasPaymentTerms, hasTitle, hasValidUntil, isDraftStatus]);
 
   const getRequiredFieldClass = (isMissing) =>
     `quote-form-field mt-1 w-full rounded-xl border bg-slate-900 px-3 py-1.5 text-xs text-white outline-none sm:py-2 sm:text-sm ${
@@ -521,6 +846,33 @@ const QuoteModal = ({
     [canSave, hasCategory, hasClient, hasInternalContact, hasItems, hasTitle, hasValues],
   );
 
+  const automaticScope = useMemo(
+    () => buildAutomaticScope(form.category, form.items, categoryScopes),
+    [categoryScopes, form.category, form.items],
+  );
+
+  const importScopePreview = useMemo(() => {
+    if (!form.category || !importPreview.length) return '';
+    const suggestedServices = importPreview
+      .filter((entry) => entry.status !== 'unmatched' && entry.derivedService?.suggestedItem)
+      .map((entry) => entry.derivedService.suggestedItem);
+    return buildAutomaticScope(form.category, suggestedServices, categoryScopes);
+  }, [categoryScopes, form.category, importPreview]);
+
+  useEffect(() => {
+    if (!open || !automaticScope || automaticScopeRef.current === null) return;
+    setForm((prev) => {
+      const currentScope = (prev.scope || '').trim();
+      if (currentScope && currentScope !== automaticScopeRef.current) {
+        automaticScopeRef.current = null;
+        return prev;
+      }
+      if (prev.scope === automaticScope) return prev;
+      automaticScopeRef.current = automaticScope;
+      return { ...prev, scope: automaticScope };
+    });
+  }, [automaticScope, open]);
+
   const activeIndex = useMemo(() => steps.findIndex((step) => step.key === activeStep), [steps, activeStep]);
   const goToStep = (key) => {
     const target = steps.find((step) => step.key === key);
@@ -536,6 +888,23 @@ const QuoteModal = ({
     const prev = steps[activeIndex - 1];
     if (prev) goToStep(prev.key);
   };
+
+  useEffect(() => {
+    if (!open) return;
+    if ((initialActiveStep || 'cliente') === 'cliente' && (initialActiveTab || 'materiais') === 'materiais') return;
+
+    const frame = window.requestAnimationFrame(() => {
+      if ((initialActiveTab || 'materiais') === 'lista-ia' && importSectionRef.current) {
+        importSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+      }
+
+      const target = steps.find((step) => step.key === (initialActiveStep || 'cliente'));
+      target?.ref?.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [initialActiveStep, initialActiveTab, open, steps]);
 
   const materialsTotal = useMemo(
     () =>
@@ -582,36 +951,94 @@ const QuoteModal = ({
   const handleAddItem = (product) => {
     if (!product) return;
     const qty = Number(quantities[product.id] || 1);
-    const existing = form.items.find((item) => item.id === product.id && item.type === activeTab);
-    let items;
-    if (existing) {
-      items = form.items.map((item) =>
-        item.id === product.id && item.type === activeTab
-          ? { ...item, quantity: item.quantity + qty, unit: item.unit || product.unit || '' }
-          : item,
-      );
-    } else {
-      items = [
-        ...form.items,
-        {
-          id: product.id,
-          name: product.name,
-          sku: product.sku,
-          price: product.price,
-          quantity: qty,
-          unit: product.unit || '',
-          type: activeTab,
-        },
-      ];
-    }
-    setForm((prev) => ({ ...prev, items }));
+    const nextItem = buildCatalogQuoteItem(product, qty, activeTab, 'catalog');
+    setForm((prev) => {
+      const items = mergeQuoteItems(prev.items, [nextItem]);
+      return { ...prev, items };
+    });
     setQuantities((prev) => ({ ...prev, [product.id]: 1 }));
   };
 
-  const openManualEdit = (item) => {
+  const handleAnalyzeImport = () => {
+    const materialCatalog = materials.map((product) => ({
+      ...product,
+      serviceReference: getResolvedProductServiceReference(product),
+    }));
+    const preview = buildImportPreview(importText, { materials: materialCatalog, services });
+    setImportPreview(preview.lines);
+    setImportSummary(preview.summary);
+    setImportError('');
+
+    if (!preview.summary.totalLines) {
+      setImportError('Cole ao menos uma linha com quantidade e descricao para analisar.');
+      return;
+    }
+
+    if (!preview.summary.matchedCount && !preview.summary.reviewCount) {
+      pushToast({
+        title: 'Nenhuma sugestao encontrada',
+        message: 'Nao houve correspondencia suficiente com o catalogo atual.',
+        type: 'error',
+        duration: 4500,
+      });
+      return;
+    }
+
+    pushToast({
+      title: 'Lista analisada',
+      message: `${preview.summary.matchedCount} material(is) com match forte, ${preview.summary.reviewCount} para revisao e ${preview.summary.derivedServicesCount} servico(s) sugerido(s).`,
+      type: 'success',
+      duration: 3500,
+    });
+  };
+
+  const handleApplyImportedItems = () => {
+    const materialItems = importPreview
+      .filter((entry) => entry.suggestedItem && entry.status !== 'unmatched')
+      .map((entry) => entry.suggestedItem);
+    const serviceItems = importPreview
+      .filter((entry) => entry.derivedService?.suggestedItem && entry.status !== 'unmatched')
+      .map((entry) => entry.derivedService.suggestedItem);
+    const suggestedItems = [...materialItems, ...serviceItems];
+
+    if (!suggestedItems.length) {
+      setImportError('Nao ha sugestoes validas para adicionar ao orcamento.');
+      return;
+    }
+
+    setForm((prev) => {
+      const items = mergeQuoteItems(prev.items, suggestedItems);
+      const nextTitle =
+        prev.title ||
+        `Rascunho importado - ${new Date().toLocaleDateString('pt-BR')}`;
+
+      return {
+        ...prev,
+        title: nextTitle,
+        status: isEditing ? prev.status : 'Rascunho',
+        items,
+      };
+    });
+
     setActiveStep('itens');
     setActiveTab('manual');
-    setManualForm({
+    setImportText('');
+    setImportPreview([]);
+    setImportSummary(null);
+    setImportError('');
+
+    pushToast({
+      title: 'Itens adicionados',
+      message: `${materialItems.length} material(is) e ${serviceItems.length} servico(s) foram enviados para o rascunho do orcamento.`,
+      type: 'success',
+      duration: 4000,
+    });
+  };
+
+  const openItemEditor = (item) => {
+    setActiveStep('itens');
+    setActiveTab('manual');
+    const nextManualForm = {
       name: item.name || '',
       sku: item.sku || '',
       category: item.category || '',
@@ -620,25 +1047,33 @@ const QuoteModal = ({
       realCost: item.realCost?.toString() || '',
       quantity: item.quantity || 1,
       type: item.type || 'materiais',
-    });
+      source: item.source || (isManualQuoteItem(item) ? 'manual' : 'catalog'),
+    };
+    setManualForm(nextManualForm);
+    manualFormBaseRef.current = manualFormSnapshot(nextManualForm);
     setManualError('');
-    setEditingManualId(item.id);
+    setEditingItemKey(getQuoteItemKey(item));
   };
 
   useEffect(() => {
-    if (!open || activeTab !== 'manual' || !editingManualId) return;
+    if (!open || activeTab !== 'manual' || !editingItemKey) return;
     const target = manualEditorRef.current;
     if (!(target instanceof HTMLElement)) return;
     const frame = window.requestAnimationFrame(() => {
       target.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [activeTab, editingManualId, open]);
+  }, [activeTab, editingItemKey, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    setSearch('');
+  }, [activeTab, open]);
 
   const parsePriceValue = (value) => {
     if (typeof value === 'number') return value;
     if (!value) return 0;
-    const cleaned = value.toString().replace(/[^0-9,.\-]/g, '');
+    const cleaned = value.toString().replace(/[^0-9,.-]/g, '');
     if (!cleaned) return 0;
     if (cleaned.includes('.') && cleaned.includes(',')) {
       const normalized = cleaned.replace(/\./g, '').replace(',', '.');
@@ -661,16 +1096,10 @@ const QuoteModal = ({
   };
 
   const resetManualForm = () => {
-    setManualForm((prev) => ({
-      ...prev,
-      name: '',
-      sku: '',
-      category: '',
-      price: '0',
-      realCost: '',
-      quantity: 1,
-    }));
-    setEditingManualId(null);
+    const emptyManualForm = createDefaultManualForm();
+    setManualForm(emptyManualForm);
+    manualFormBaseRef.current = manualFormSnapshot(emptyManualForm);
+    setEditingItemKey(null);
     setManualError('');
   };
 
@@ -691,9 +1120,12 @@ const QuoteModal = ({
       setManualError('Informe um valor real valido.');
       return;
     }
+    const originalItem = editingItemKey
+      ? form.items.find((item) => getQuoteItemKey(item) === editingItemKey) || null
+      : null;
     setManualError('');
     const updatedItem = {
-      id: editingManualId || `manual-${crypto.randomUUID()}`,
+      id: originalItem?.id || `manual-${crypto.randomUUID()}`,
       name,
       sku: manualForm.sku.trim(),
       category: manualForm.category.trim(),
@@ -702,12 +1134,20 @@ const QuoteModal = ({
       quantity: qty,
       unit: manualForm.unit,
       type: manualForm.type,
-      source: 'manual',
+      source: manualForm.source || originalItem?.source || 'manual',
     };
-    if (editingManualId) {
+    const nextItemKey = getQuoteItemKey(updatedItem);
+    const hasConflict = form.items.some(
+      (item) => getQuoteItemKey(item) === nextItemKey && getQuoteItemKey(item) !== editingItemKey,
+    );
+    if (hasConflict) {
+      setManualError('Ja existe um item desse tipo com o mesmo identificador no orcamento.');
+      return;
+    }
+    if (editingItemKey) {
       setForm((prev) => ({
         ...prev,
-        items: prev.items.map((item) => (item.id === editingManualId ? { ...item, ...updatedItem } : item)),
+        items: prev.items.map((item) => (getQuoteItemKey(item) === editingItemKey ? { ...item, ...updatedItem } : item)),
       }));
     } else {
       setForm((prev) => ({ ...prev, items: [...prev.items, updatedItem] }));
@@ -715,12 +1155,64 @@ const QuoteModal = ({
     resetManualForm();
   };
 
-  const handleRemoveItem = (id) => {
-    setForm((prev) => ({ ...prev, items: prev.items.filter((item) => item.id !== id) }));
+  const handleRemoveItem = (targetItem) => {
+    const targetKey = getQuoteItemKey(targetItem);
+    setForm((prev) => ({ ...prev, items: prev.items.filter((item) => getQuoteItemKey(item) !== targetKey) }));
+    if (editingItemKey === targetKey) {
+      resetManualForm();
+    }
   };
 
   const handleChange = (field, value) => {
+    if (field === 'scope') {
+      automaticScopeRef.current = null;
+    }
     setForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const regenerateScope = () => {
+    const nextScope = buildAutomaticScope(form.category, form.items, categoryScopes);
+    if (!nextScope) {
+      pushToast({
+        title: 'Selecione uma categoria',
+        message: 'A categoria define a estrutura inicial do escopo automatico.',
+        type: 'error',
+      });
+      return;
+    }
+    automaticScopeRef.current = nextScope;
+    setForm((prev) => ({ ...prev, scope: nextScope }));
+    pushToast({
+      title: 'Escopo atualizado',
+      message: 'O texto foi gerado a partir da categoria, materiais e servicos selecionados.',
+      type: 'success',
+    });
+  };
+
+  const updateCategoryScope = (category, value) => {
+    setCategoryScopes((prev) => ({ ...prev, [category]: value }));
+  };
+
+  const saveCategoryScopes = () => {
+    try {
+      window.localStorage.setItem(CATEGORY_SCOPE_STORAGE_KEY, JSON.stringify(categoryScopes));
+      setScopeHelpOpen(false);
+      pushToast({
+        title: 'Padroes de escopo salvos',
+        message: 'Os proximos escopos usarao os textos personalizados por categoria.',
+        type: 'success',
+      });
+    } catch {
+      pushToast({
+        title: 'Nao foi possivel salvar',
+        message: 'O navegador bloqueou o armazenamento local dos textos de escopo.',
+        type: 'error',
+      });
+    }
+  };
+
+  const restoreCategoryScope = () => {
+    updateCategoryScope(scopeTemplateCategory, DEFAULT_CATEGORY_SCOPES[scopeTemplateCategory] || '');
   };
 
   const buildBreakdownText = (breakdown) => {
@@ -738,6 +1230,7 @@ const QuoteModal = ({
       };
     });
     setLaborForm(nextForm);
+    laborFormBaseRef.current = laborFormSnapshot(nextForm);
     setLaborModalOpen(true);
   };
 
@@ -785,11 +1278,11 @@ const QuoteModal = ({
     if (savingRef.current) return;
     if (!canSave) {
       setShowValidation(true);
-      if (!hasClient || !hasInternalContact || !hasTitle || !hasCategory) {
+      if (!isDraftStatus && (!hasClient || !hasInternalContact || !hasTitle || !hasCategory)) {
         goToStep('cliente');
       } else if (!hasItems) {
         goToStep('itens');
-      } else if (!hasValues) {
+      } else if (!isDraftStatus && !hasValues) {
         goToStep('valores');
       } else {
         goToStep('revisao');
@@ -800,6 +1293,8 @@ const QuoteModal = ({
     setIsSaving(true);
     try {
       await onSave({ ...form, ...totals });
+      sessionSnapshotRef.current = draftSnapshot(form);
+      setCloseConfirmOpen(false);
       if (draftKey) {
         clearQuoteDraft(draftKey);
         setDraftMeta(null);
@@ -810,9 +1305,24 @@ const QuoteModal = ({
     }
   };
 
+  const handleConfirmSaveAndClose = () => {
+    setCloseConfirmOpen(false);
+    submit();
+  };
+
+  const handleCloseWithoutSaving = () => {
+    if (draftKey) {
+      clearQuoteDraft(draftKey);
+      setDraftMeta(null);
+    }
+    setCloseConfirmOpen(false);
+    onClose();
+  };
+
   const handleDiscardDraft = () => {
     const baseForm = buildInitialForm(sourceQuote, isEditing);
     draftBaseSnapshotRef.current = draftSnapshot(baseForm);
+    sessionSnapshotRef.current = draftSnapshot(baseForm);
     clearQuoteDraft(draftKey);
     setDraftMeta(null);
     setForm(baseForm);
@@ -834,8 +1344,8 @@ const QuoteModal = ({
       className={`cyber-overlay fixed inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain px-2 py-4 sm:items-center sm:px-3 sm:py-6 ${modalPalette.overlay}`}
       onMouseDown={(event) => {
         if (event.target !== event.currentTarget) return;
-        if (isSaving || laborModalOpen) return;
-        onClose();
+        if (isSaving || laborModalOpen || closeConfirmOpen) return;
+        requestClose();
       }}
     >
       <div
@@ -873,7 +1383,7 @@ const QuoteModal = ({
               </button>
               <button
                 type="button"
-                onClick={onClose}
+                onClick={requestClose}
                 disabled={isSaving}
                 className="quote-action-chip rounded-xl border border-white/10 bg-white/5 p-1.5 text-slate-200 transition hover:border-primary/40 hover:bg-white/10 hover:text-white"
               >
@@ -1140,7 +1650,32 @@ const QuoteModal = ({
             </label>
 
             <label className="block text-xs font-semibold text-slate-300 sm:text-sm">
-              Escopo
+              <span className="flex items-center justify-between gap-2">
+                <span>Escopo</span>
+                <span className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={regenerateScope}
+                    className="inline-flex items-center gap-1 rounded-lg border border-primary/30 bg-primary/10 px-2 py-1 text-[10px] font-semibold text-primary-100 transition hover:border-primary/50 hover:bg-primary/20 sm:text-[11px]"
+                    title="Gerar novamente usando categoria e servicos"
+                  >
+                    <Sparkles className="h-3 w-3" />
+                    Gerar escopo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setScopeTemplateCategory(form.category || CATEGORY_OPTIONS[0]);
+                      setScopeHelpOpen(true);
+                    }}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/15 bg-white/5 text-slate-300 transition hover:border-primary/50 hover:bg-primary/10 hover:text-white"
+                    title="Como funciona e editar os padroes"
+                    aria-label="Ajuda sobre o escopo automatico"
+                  >
+                    <CircleHelp className="h-3.5 w-3.5" />
+                  </button>
+                </span>
+              </span>
               <textarea
                 value={form.scope}
                 onChange={(e) => handleChange('scope', e.target.value)}
@@ -1148,6 +1683,9 @@ const QuoteModal = ({
                 placeholder="Descreva brevemente o escopo"
                 rows={3}
               />
+              <span className="mt-1 block text-[10px] font-normal text-slate-400 sm:text-[11px]">
+                Preenchido automaticamente pela categoria e pelos servicos. Materiais nao alteram o escopo.
+              </span>
             </label>
 
             </div>
@@ -1242,15 +1780,28 @@ const QuoteModal = ({
                   className="mt-1 w-full rounded-xl border border-white/15 bg-slate-900 px-3 py-1.5 text-xs sm:py-2 sm:text-sm text-white outline-none focus:border-primary/60"
                 />
               </label>
-              <label className="block text-xs font-semibold text-slate-300 sm:text-sm">
-                Notas
+              <label className="block text-xs font-semibold text-slate-300 sm:col-span-3 sm:text-sm">
+                <span className="flex items-center justify-between gap-2">
+                  <span>Premissas</span>
+                  <button
+                    type="button"
+                    onClick={() => setAssumptionsOpen(true)}
+                    className="inline-flex items-center gap-1 rounded-lg border border-white/15 bg-white/5 px-2 py-1 text-[10px] font-semibold text-slate-300 transition hover:border-primary/40 hover:bg-primary/10 hover:text-white sm:text-[11px]"
+                  >
+                    <Maximize2 className="h-3 w-3" />
+                    Abrir editor
+                  </button>
+                </span>
                 <textarea
                   value={form.notes}
                   onChange={(e) => handleChange('notes', e.target.value)}
-                  rows={3}
-                  className="mt-1 w-full resize-none rounded-xl border border-white/15 bg-slate-900 px-3 py-1.5 text-xs sm:py-2 sm:text-sm text-white outline-none focus:border-primary/60 placeholder:text-slate-400"
-                  placeholder="Observacoes internas"
+                  rows={4}
+                  className="mt-1 w-full resize-y rounded-xl border border-white/15 bg-slate-900 px-3 py-2 text-xs leading-relaxed text-white outline-none focus:border-primary/60 sm:text-sm placeholder:text-slate-500"
+                  placeholder="Ex: infraestrutura existente disponível, execução em horário comercial e acesso às áreas liberado pelo cliente."
                 />
+                <span className="mt-1 block text-[10px] font-normal text-slate-400 sm:text-[11px]">
+                  Registre condições consideradas para composição da proposta e execução dos serviços.
+                </span>
               </label>
             </div>
 
@@ -1346,18 +1897,37 @@ const QuoteModal = ({
                 >
                   Manual
                 </button>
+                <button
+                  type="button"
+                  className={getTabButtonClass(activeTab === 'lista-ia')}
+                  onClick={() => setActiveTab('lista-ia')}
+                >
+                  Lista IA
+                </button>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {activeTab !== 'manual' ? (
+                {activeTab === 'materiais' || activeTab === 'servicos' ? (
                   <>
-                    <input
-                      placeholder="Buscar por nome, SKU ou categoria"
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                      className="w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-1 text-xs text-white outline-none focus:border-primary/50 sm:w-56 sm:py-1.5 sm:text-sm"
-                    />
+                    <div className="relative w-full sm:w-56">
+                      <input
+                        placeholder="Buscar por nome, SKU ou categoria"
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        className="w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-1 pr-9 text-xs text-white outline-none focus:border-primary/50 sm:py-1.5 sm:text-sm"
+                      />
+                      {search ? (
+                        <button
+                          type="button"
+                          onClick={() => setSearch('')}
+                          className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 transition hover:bg-white/5 hover:text-white"
+                          aria-label="Limpar busca"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      ) : null}
+                    </div>
                     <select
-                      className="w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-1 text-xs text-white outline-none focus:border-primary/50 sm:w-44 sm:py-1.5 sm:text-sm"
+                      className="w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-1 text-[11px] text-white outline-none focus:border-primary/50 sm:w-44 sm:py-1.5 sm:text-[12px]"
                       value={form.categoryFilter || ''}
                       onChange={(e) => setForm((prev) => ({ ...prev, categoryFilter: e.target.value || undefined }))}
                     >
@@ -1369,20 +1939,204 @@ const QuoteModal = ({
                       ))}
                     </select>
                   </>
+                ) : activeTab === 'lista-ia' ? (
+                  <span className="text-[11px] text-slate-400 sm:text-xs">
+                    Cole a lista e deixe a IA montar o rascunho automaticamente.
+                  </span>
                 ) : (
                   <span className="text-[11px] text-slate-400 sm:text-xs">
-                    Adicione um item manual apenas neste orçamento.
+                    Adicione ou edite um item apenas neste orçamento.
                   </span>
                 )}
               </div>
             </div>
 
+            {activeTab === 'lista-ia' ? (
+            <div
+              ref={importSectionRef}
+              className="quote-panel rounded-2xl border border-amber-300/20 bg-amber-500/10 p-3 shadow-[0_14px_30px_rgba(245,158,11,0.08)] sm:p-3.5"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold text-amber-100 sm:text-sm">Criacao automatica por lista</p>
+                  <p className="mt-1 text-[11px] text-amber-50/80 sm:text-xs">
+                    Cole uma lista simples. O sistema compara as palavras com o catalogo e monta um rascunho com os itens mais proximos.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button type="button" className="btn-secondary" onClick={handleAnalyzeImport}>
+                    Comparar lista
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    onClick={handleApplyImportedItems}
+                    disabled={
+                      !importPreview.some(
+                        (entry) =>
+                          entry.status !== 'unmatched' &&
+                          (entry.suggestedItem || entry.derivedService?.suggestedItem),
+                      )
+                    }
+                  >
+                    Criar rascunho
+                  </button>
+                </div>
+              </div>
+
+              <textarea
+                value={importText}
+                onChange={(event) => {
+                  setImportText(event.target.value);
+                  if (importError) setImportError('');
+                  if (importPreview.length) {
+                    setImportPreview([]);
+                    setImportSummary(null);
+                  }
+                }}
+                rows={6}
+                className="mt-3 w-full rounded-2xl border border-amber-200/15 bg-slate-950/75 px-3 py-2 text-xs text-white outline-none transition placeholder:text-slate-500 focus:border-amber-200/40 sm:text-sm"
+                placeholder={`200m fibra optica sm 4fo\n150m eletrodutos pvc 3/4\n10 conduletes pvc 3/4`}
+              />
+
+              {importError ? <p className="mt-2 text-[11px] text-rose-200">{importError}</p> : null}
+
+              {importSummary ? (
+                <div className="mt-3 flex flex-wrap gap-2 text-[11px] sm:text-xs">
+                  <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-slate-200">
+                    {importSummary.totalLines} linha(s)
+                  </span>
+                  <span className="rounded-full border border-emerald-300/20 bg-emerald-500/10 px-2.5 py-1 text-emerald-100">
+                    {importSummary.matchedCount} match forte
+                  </span>
+                  <span className="rounded-full border border-amber-300/20 bg-amber-500/10 px-2.5 py-1 text-amber-50">
+                    {importSummary.reviewCount} revisar
+                  </span>
+                  <span className="rounded-full border border-sky-300/20 bg-sky-500/10 px-2.5 py-1 text-sky-100">
+                    {importSummary.derivedServicesCount} servicos
+                  </span>
+                  <span className="rounded-full border border-rose-300/20 bg-rose-500/10 px-2.5 py-1 text-rose-100">
+                    {importSummary.unmatchedCount} sem match
+                  </span>
+                </div>
+              ) : null}
+
+              {importPreview.length ? (
+                <div className="mt-3 rounded-2xl border border-violet-300/20 bg-violet-500/10 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-[11px] font-semibold text-violet-50 sm:text-xs">Prévia do escopo</p>
+                    <span className="text-[10px] text-violet-100/70 sm:text-[11px]">
+                      {form.category ? form.category : 'Categoria ainda não selecionada'}
+                    </span>
+                  </div>
+                  {importScopePreview ? (
+                    <div className="mt-2 whitespace-pre-line rounded-xl border border-white/10 bg-slate-950/45 px-3 py-2 text-[10px] leading-relaxed text-slate-200 sm:text-[11px]">
+                      {importScopePreview}
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-[10px] text-violet-100/75 sm:text-[11px]">
+                      Selecione a categoria do orçamento para visualizar o escopo que será criado com os serviços sugeridos.
+                    </p>
+                  )}
+                </div>
+              ) : null}
+
+              {importPreview.length ? (
+                <div className="mt-3 max-h-[24rem] space-y-2 overflow-y-auto pr-1">
+                  {importPreview.map((entry) => {
+                    const badgeClass =
+                      entry.status === 'matched'
+                        ? 'border-emerald-300/20 bg-emerald-500/10 text-emerald-100'
+                        : entry.status === 'review'
+                          ? 'border-amber-300/20 bg-amber-500/10 text-amber-50'
+                          : 'border-rose-300/20 bg-rose-500/10 text-rose-100';
+
+                    return (
+                      <div key={entry.id} className="rounded-2xl border border-white/10 bg-slate-950/60 p-3">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-[11px] font-semibold text-white sm:text-xs">{entry.rawLine}</p>
+                            <p className="mt-1 text-[10px] text-slate-400 sm:text-[11px]">Solicitado: {entry.requestedLabel}</p>
+                          </div>
+                          <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${badgeClass}`}>
+                            {entry.status === 'matched' ? 'Match forte' : entry.status === 'review' ? 'Revisar' : 'Sem match'}
+                          </span>
+                        </div>
+
+                        {entry.bestMatch ? (
+                          <div className="mt-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <p className="text-[11px] font-semibold text-white sm:text-xs">{entry.bestMatch.name}</p>
+                              <span className="text-[10px] text-slate-400 sm:text-[11px]">{entry.confidence}% de confianca</span>
+                            </div>
+                            <p className="mt-1 text-[10px] text-slate-400 sm:text-[11px]">
+                              {entry.bestMatch.sku || 'SKU'} · {entry.bestMatch.type} · {formatCurrency(entry.bestMatch.price)}
+                            </p>
+                            <p className="mt-2 text-[10px] text-slate-300 sm:text-[11px]">
+                              Quantidade sugerida: <span className="font-semibold text-white">{entry.suggestedItem?.quantity || 0}</span>
+                            </p>
+                            {entry.note ? <p className="mt-1 text-[10px] text-slate-400 sm:text-[11px]">{entry.note}</p> : null}
+                            {entry.matchedTokens.length ? (
+                              <p className="mt-1 text-[10px] text-slate-500 sm:text-[11px]">Palavras consideradas: {entry.matchedTokens.join(', ')}</p>
+                            ) : null}
+                            {entry.alternatives.length ? (
+                              <p className="mt-1 text-[10px] text-slate-500 sm:text-[11px]">
+                                Alternativas: {entry.alternatives.map((option) => option.name).join(' | ')}
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <p className="mt-2 text-[10px] text-rose-100 sm:text-[11px]">
+                            Nenhum item do catalogo teve correspondencia suficiente para esta linha.
+                          </p>
+                        )}
+
+                        {entry.derivedService?.bestMatch ? (
+                          <div className="mt-2 rounded-xl border border-sky-300/20 bg-sky-500/10 px-3 py-2">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <p className="text-[11px] font-semibold text-sky-50 sm:text-xs">
+                                Servico sugerido: {entry.derivedService.bestMatch.name}
+                              </p>
+                              <span className="text-[10px] text-sky-100/80 sm:text-[11px]">
+                                {formatCurrency(entry.derivedService.bestMatch.price)}
+                              </span>
+                            </div>
+                            <p className="mt-1 text-[10px] text-sky-100/80 sm:text-[11px]">
+                              {entry.derivedService.bestMatch.sku || 'SKU'} · Quantidade sugerida:{' '}
+                              <span className="font-semibold text-white">{entry.derivedService.suggestedItem?.quantity || 0}</span>
+                            </p>
+                            {entry.derivedService.note ? (
+                              <p className="mt-1 text-[10px] text-sky-100/70 sm:text-[11px]">{entry.derivedService.note}</p>
+                            ) : null}
+                            {entry.derivedService.alternatives.length ? (
+                              <p className="mt-1 text-[10px] text-sky-100/60 sm:text-[11px]">
+                                Alternativas de servico: {entry.derivedService.alternatives.map((option) => option.name).join(' | ')}
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : entry.bestMatch ? (
+                          <p className="mt-2 text-[10px] text-slate-500 sm:text-[11px]">
+                            Nenhum servico compativel foi encontrado automaticamente para este material.
+                          </p>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
+            ) : null}
+
             <div className={`${insetPanelClass} p-3 sm:p-3.5`}>
-              {activeTab === 'manual' ? (
+              {activeTab === 'lista-ia' ? (
+                <p className="text-xs text-slate-400 sm:text-sm">
+                  A previa da comparacao e a criacao do rascunho aparecem logo acima.
+                </p>
+              ) : activeTab === 'manual' ? (
                 <div ref={manualEditorRef} className="space-y-2">
-                  {editingManualId && (
+                  {editingItemKey && (
                     <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] text-slate-300">
-                      <span>Editando item manual</span>
+                      <span>Editando item do orçamento</span>
                       <button
                         type="button"
                         className="rounded-lg border border-white/10 px-2 py-1 text-[11px] text-slate-200 hover:border-primary/40"
@@ -1481,7 +2235,7 @@ const QuoteModal = ({
                         onClick={handleAddManualItem}
                       >
                         <Plus className="h-4 w-4" />
-                        {editingManualId ? 'Atualizar' : 'Adicionar'}
+                        {editingItemKey ? 'Atualizar' : 'Adicionar'}
                       </button>
                     </div>
                   </div>
@@ -1534,11 +2288,11 @@ const QuoteModal = ({
               ) : (
                 <div className="max-h-[36rem] space-y-2 overflow-y-auto pr-1 sm:max-h-[40rem]">
                   {form.items.map((item) => {
-                    const isManualItem = item.source === 'manual' || `${item.id}`.startsWith('manual-');
+                    const isManualItem = isManualQuoteItem(item);
                     return (
                       <div
-                      key={item.id}
-                      className={`flex flex-col gap-2 rounded-xl px-3 py-1.5 sm:flex-row sm:items-center sm:justify-between sm:py-2 ${
+                        key={getQuoteItemKey(item)}
+                        className={`flex flex-col gap-2 rounded-xl px-3 py-1.5 sm:flex-row sm:items-center sm:justify-between sm:py-2 ${
                         isManualItem
                           ? 'quote-manual-item border'
                           : 'quote-selected-item'
@@ -1557,19 +2311,17 @@ const QuoteModal = ({
                           {formatCurrency(item.quantity * item.price)}
                         </p>
                         <div className="flex items-center gap-2">
-                          {isManualItem && (
-                            <button
-                              type="button"
-                              onClick={() => openManualEdit(item)}
-                              className="rounded-lg border border-white/10 p-2 text-slate-300 hover:border-amber-400/50 hover:text-amber-100"
-                              title="Editar item manual"
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </button>
-                          )}
                           <button
                             type="button"
-                            onClick={() => handleRemoveItem(item.id)}
+                            onClick={() => openItemEditor(item)}
+                            className="rounded-lg border border-white/10 p-2 text-slate-300 hover:border-amber-400/50 hover:text-amber-100"
+                            title="Editar item"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveItem(item)}
                             className="rounded-lg border border-white/10 p-2 text-slate-300 hover:border-rose-500/50 hover:text-rose-200"
                           >
                             <Trash2 className="h-4 w-4" />
@@ -1596,7 +2348,9 @@ const QuoteModal = ({
           <div className="mb-2 flex items-center justify-between sm:mb-3">
             <div>
               <p className="text-xs uppercase tracking-[0.16em] text-slate-400">Revisao</p>
-              <p className="text-xs font-semibold text-white sm:text-sm">Confira antes de salvar</p>
+              <p className="text-xs font-semibold text-white sm:text-sm">
+                {isDraftStatus ? 'Rascunho pode ser salvo sem cliente e dados comerciais completos' : 'Confira antes de salvar'}
+              </p>
             </div>
             <div className="text-right text-[11px] text-slate-400 sm:text-xs">
               <p>Total</p>
@@ -1633,7 +2387,7 @@ const QuoteModal = ({
           )}
         </div>
 
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 sm:mt-4">
+        <div className="relative z-40 mt-3 flex flex-wrap items-center justify-between gap-3 sm:mt-4">
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -1661,7 +2415,7 @@ const QuoteModal = ({
               </div>
             )}
             <div className="flex items-center gap-3">
-              <button type="button" className="btn-secondary" onClick={onClose} disabled={isSaving}>
+              <button type="button" className="btn-secondary" onClick={requestClose} disabled={isSaving}>
                 Cancelar
               </button>
               <button type="button" className="btn-primary" onClick={submit} disabled={isSaving}>
@@ -1671,7 +2425,7 @@ const QuoteModal = ({
                     Salvando...
                   </>
                 ) : (
-                  'Salvar orcamento'
+                  isDraftStatus ? 'Salvar rascunho' : 'Salvar orcamento'
                 )}
               </button>
             </div>
@@ -1679,8 +2433,8 @@ const QuoteModal = ({
         </div>
         </div>
 
-        <div className={`quote-modal-floating-total pointer-events-none absolute bottom-20 right-3 z-30 transition-all duration-200 sm:bottom-5 sm:right-4 ${hideFloatingTotal || !shouldShowFloatingTotal ? 'translate-y-3 opacity-0' : 'translate-y-0 opacity-100'}`}>
-          <div className="quote-total-box pointer-events-auto min-w-[9rem] rounded-2xl border border-white/10 px-3 py-2 text-right shadow-[0_14px_34px_rgba(2,6,23,0.24)] sm:min-w-[10rem] sm:px-4 sm:py-3">
+        <div className={`quote-modal-floating-total pointer-events-none absolute bottom-20 right-3 z-20 transition-all duration-200 sm:bottom-5 sm:right-4 ${hideFloatingTotal || !shouldShowFloatingTotal ? 'translate-y-3 opacity-0' : 'translate-y-0 opacity-100'}`}>
+          <div className="quote-total-box min-w-[9rem] rounded-2xl border border-white/10 px-3 py-2 text-right shadow-[0_14px_34px_rgba(2,6,23,0.24)] sm:min-w-[10rem] sm:px-4 sm:py-3">
             <p className="text-[10px] uppercase tracking-[0.16em] text-slate-300/80">Total</p>
             <p className="mt-1 text-base font-bold text-white sm:text-lg">{formatCurrency(totals.total)}</p>
           </div>
@@ -1698,6 +2452,179 @@ const QuoteModal = ({
             <div>
               <p className="text-base font-semibold text-white">Salvando orcamento</p>
               <p className="text-xs text-slate-300">Aguarde alguns instantes.</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {assumptionsOpen && !isSaving && (
+        <div
+          className="cyber-overlay fixed inset-0 z-[73] flex items-center justify-center bg-slate-950/78 px-3 py-5 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setAssumptionsOpen(false);
+          }}
+        >
+          <div
+            className={`cyber-dialog w-full max-w-2xl rounded-2xl border p-4 sm:p-5 ${modalPalette.surface} ${modalPalette.border} ${modalPalette.glow}`}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.16em] text-primary-200">Condições da proposta</p>
+                <h4 className="mt-1 text-base font-semibold text-white sm:text-lg">Premissas do orçamento</h4>
+                <p className="mt-1 text-xs text-slate-400">
+                  Informe condições de acesso, infraestrutura disponível, horários, responsabilidades e limitações consideradas.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAssumptionsOpen(false)}
+                className="rounded-lg border border-white/10 p-2 text-slate-300 hover:border-primary/40 hover:text-white"
+                aria-label="Fechar editor de premissas"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <textarea
+              autoFocus
+              value={form.notes}
+              onChange={(event) => handleChange('notes', event.target.value)}
+              rows={12}
+              className="mt-4 w-full resize-y rounded-2xl border border-white/15 bg-slate-950/70 px-4 py-3 text-sm leading-relaxed text-white outline-none focus:border-primary/60 placeholder:text-slate-500"
+              placeholder={`Exemplos:\n• Execução prevista em horário comercial.\n• Infraestrutura de encaminhamento disponibilizada pelo cliente.\n• Acesso às áreas técnicas previamente autorizado.`}
+            />
+            <div className="mt-4 flex justify-end">
+              <button type="button" className="btn-primary" onClick={() => setAssumptionsOpen(false)}>
+                Concluir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {scopeHelpOpen && !isSaving && (
+        <div
+          className="cyber-overlay fixed inset-0 z-[74] flex items-center justify-center bg-slate-950/78 px-3 py-5 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeScopeHelp();
+          }}
+        >
+          <div
+            className={`cyber-dialog w-full max-w-xl rounded-2xl border p-4 sm:p-5 ${modalPalette.surface} ${modalPalette.border} ${modalPalette.glow}`}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.16em] text-primary-200">Escopo inteligente</p>
+                <h4 className="mt-1 text-base font-semibold text-white sm:text-lg">Como funciona</h4>
+              </div>
+              <button
+                type="button"
+                onClick={closeScopeHelp}
+                className="rounded-lg border border-white/10 p-2 text-slate-300 hover:border-primary/40 hover:text-white"
+                aria-label="Fechar ajuda"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3 text-xs leading-relaxed text-slate-300 sm:text-sm">
+              <p>
+                A categoria fornece a introducao padrao. Cada servico selecionado acrescenta uma descricao tecnica,
+                considerando a atividade, o quantitativo e o local indicado depois do hifen no nome do servico.
+              </p>
+              <p className="mt-2 text-slate-400">
+                Materiais nao sao copiados para o escopo. Uma edicao manual tambem nao sera sobrescrita; use
+                <span className="font-semibold text-slate-200"> Gerar escopo</span> quando quiser recalcular todo o texto.
+              </p>
+            </div>
+
+            <div className="mt-4 rounded-xl border border-white/10 bg-slate-950/35 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-xs font-semibold text-white sm:text-sm">Texto padrao da categoria</p>
+                  <p className="text-[10px] text-slate-400 sm:text-[11px]">Salvo somente neste navegador.</p>
+                </div>
+                <select
+                  value={scopeTemplateCategory}
+                  onChange={(event) => setScopeTemplateCategory(event.target.value)}
+                  className="rounded-lg border border-white/15 bg-slate-900 px-2.5 py-1.5 text-xs text-white outline-none focus:border-primary/60"
+                >
+                  {CATEGORY_OPTIONS.map((category) => (
+                    <option key={category} value={category}>{category}</option>
+                  ))}
+                </select>
+              </div>
+              <textarea
+                value={categoryScopes[scopeTemplateCategory] || ''}
+                onChange={(event) => updateCategoryScope(scopeTemplateCategory, event.target.value)}
+                rows={4}
+                className="mt-3 w-full resize-y rounded-xl border border-white/15 bg-slate-900 px-3 py-2 text-xs text-white outline-none focus:border-primary/60 sm:text-sm"
+                placeholder="Digite a introducao padrao desta categoria"
+              />
+              <div className="mt-3 flex flex-wrap justify-between gap-2">
+                <button type="button" className="btn-secondary" onClick={restoreCategoryScope}>
+                  Restaurar este padrao
+                </button>
+                <div className="flex gap-2">
+                  <button type="button" className="btn-secondary" onClick={closeScopeHelp}>
+                    Cancelar
+                  </button>
+                  <button type="button" className="btn-primary" onClick={saveCategoryScopes}>
+                    Salvar padroes
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {closeConfirmOpen && !isSaving && (
+        <div
+          className="cyber-overlay fixed inset-0 z-[75] flex items-center justify-center bg-slate-950/78 px-4 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (event.target !== event.currentTarget) return;
+            setCloseConfirmOpen(false);
+          }}
+        >
+          <div
+            className={`cyber-dialog w-full max-w-md rounded-2xl border p-4 sm:p-5 ${modalPalette.surface} ${modalPalette.border} ${modalPalette.glow}`}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Alteracoes nao salvas</p>
+            <h4 className="mt-1 text-base font-semibold text-white sm:text-lg">
+              {hasPendingAuxChanges ? 'Existem alteracoes pendentes de aplicar' : 'Salvar antes de fechar?'}
+            </h4>
+            {hasPendingAuxChanges ? (
+              <p className="mt-2 text-xs text-slate-300 sm:text-sm">
+                Ha digitacoes ou ajustes ainda nao aplicados ao orcamento nos formularios auxiliares. Para preserva-los,
+                continue editando e conclua a acao antes de fechar.
+                {hasUnsavedQuoteChanges
+                  ? ' O orcamento atual tambem possui alteracoes ja aplicadas, mas o fechamento com salvamento so fica disponivel depois que essas pendencias forem resolvidas.'
+                  : ''}
+              </p>
+            ) : (
+              <p className="mt-2 text-xs text-slate-300 sm:text-sm">
+                Existem modificacoes neste orcamento que ainda nao foram salvas. Deseja salvar antes de fechar a janela?
+              </p>
+            )}
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <button type="button" className="btn-secondary" onClick={() => setCloseConfirmOpen(false)}>
+                Continuar editando
+              </button>
+              <button
+                type="button"
+                className="btn-secondary border-rose-400/25 text-rose-100 hover:border-rose-400/45 hover:text-rose-50"
+                onClick={handleCloseWithoutSaving}
+              >
+                Fechar sem salvar
+              </button>
+              {canSaveAndCloseFromConfirm ? (
+                <button type="button" className="btn-primary" onClick={handleConfirmSaveAndClose}>
+                  Salvar e fechar
+                </button>
+              ) : null}
             </div>
           </div>
         </div>

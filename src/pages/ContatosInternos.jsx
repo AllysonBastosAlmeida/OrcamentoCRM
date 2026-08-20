@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Briefcase, Pencil, Plus, Trash2, Users } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { useEmployees } from '../hooks/useEmployees.js';
+import ModalPortal from '../components/ModalPortal.jsx';
 import { useToast } from '../components/ToastHost.jsx';
 
 const emptyEmployee = {
@@ -361,7 +362,8 @@ const ContatosInternos = () => {
       </div>
 
       {modalOpen && (
-        <div
+        <ModalPortal>
+          <div
           className="cyber-overlay fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-4"
           onMouseDown={(event) => {
             if (event.target !== event.currentTarget || savingEmployee) return;
@@ -433,11 +435,13 @@ const ContatosInternos = () => {
               </button>
             </div>
           </div>
-        </div>
+          </div>
+        </ModalPortal>
       )}
 
       {savingEmployee && modalOpen && (
-        <div className="cyber-overlay fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4 backdrop-blur-sm">
+        <ModalPortal>
+          <div className="cyber-overlay fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4 backdrop-blur-sm">
           <div className="cyber-dialog cyber-loading-dialog flex w-full max-w-sm flex-col items-center gap-4 rounded-2xl border border-white/15 bg-white/5 p-6 text-center shadow-2xl">
             <div className="relative flex h-24 w-24 items-center justify-center">
               <div className="absolute h-24 w-24 animate-spin rounded-full border-2 border-primary/40 border-t-transparent" />
@@ -449,11 +453,13 @@ const ContatosInternos = () => {
               <p className="text-xs text-slate-300">Aguarde alguns instantes.</p>
             </div>
           </div>
-        </div>
+          </div>
+        </ModalPortal>
       )}
 
       {confirmEmployee && (
-        <div
+        <ModalPortal>
+          <div
           className="cyber-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4"
           onMouseDown={(event) => {
             if (event.target !== event.currentTarget || deletingEmployee) return;
@@ -480,7 +486,8 @@ const ContatosInternos = () => {
               </button>
             </div>
           </div>
-        </div>
+          </div>
+        </ModalPortal>
       )}
     </div>
   );

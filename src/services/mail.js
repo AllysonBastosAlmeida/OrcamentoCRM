@@ -37,7 +37,17 @@ const toBase64 = async (blob) => {
   return btoa(binary);
 };
 
-export const createQuoteDraft = async ({ to, subject, body, bodyHtml, pdfBlob, pdfFilename }) => {
+const toRecipients = (value) =>
+  (Array.isArray(value) ? value : [value])
+    .map((entry) => (entry || '').toString().trim())
+    .filter(Boolean)
+    .map((address) => ({
+      emailAddress: {
+        address,
+      },
+    }));
+
+export const createQuoteDraft = async ({ to, cc, subject, body, bodyHtml, pdfBlob, pdfFilename }) => {
   const token = await acquireToken();
   const attachments = [];
 
@@ -66,13 +76,8 @@ export const createQuoteDraft = async ({ to, subject, body, bodyHtml, pdfBlob, p
         contentType: bodyHtml ? 'HTML' : 'Text',
         content: bodyHtml || body,
       },
-      toRecipients: [
-        {
-          emailAddress: {
-            address: to,
-          },
-        },
-      ],
+      toRecipients: toRecipients(to),
+      ...(cc ? { ccRecipients: toRecipients(cc) } : {}),
       ...(attachments.length ? { attachments } : {}),
     }),
   });

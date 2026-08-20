@@ -39,6 +39,16 @@ const computeTotals = (items = [], discountValue = 0, taxRate = 0) => {
   return { subtotal, total };
 };
 
+const withComputedTotals = (quote) => {
+  const { subtotal, total } = computeTotals(quote?.items, quote?.discountValue, quote?.taxRate);
+  return {
+    ...quote,
+    subtotal,
+    total,
+    totalNumber: total,
+  };
+};
+
 const quoteClientLabel = (quote) => quote?.clientCompany || quote?.clientName || '';
 
 const quoteItemCount = (quote) => (Array.isArray(quote?.items) ? quote.items.length : 0);
@@ -126,10 +136,9 @@ export const getQuotes = () => {
 };
 
 export const createQuote = async (payload) => {
-  const { subtotal, total } = computeTotals(payload.items, payload.discountValue, payload.taxRate);
   const user = getUserMeta();
   const now = new Date().toISOString();
-  const quote = {
+  const quote = withComputedTotals({
     ...payload,
     id: crypto.randomUUID(),
     createdAt: now,
@@ -140,9 +149,7 @@ export const createQuote = async (payload) => {
     updatedByEmail: user.email,
     approvalStatus: payload.approvalStatus || 'Aguardando',
     source: 'local',
-    subtotal,
-    total,
-  };
+  });
 
   if (hasQuoteSheetConfig) {
     try {
@@ -194,8 +201,7 @@ export const updateQuote = async (id, updates, fallbackQuote) => {
       updatedAt: now,
       source: quote?.source || updates?.source || 'local',
     };
-    const { subtotal, total } = computeTotals(merged.items, merged.discountValue, merged.taxRate);
-    return { ...merged, subtotal, total };
+    return withComputedTotals(merged);
   };
 
   const quotes = getQuotes().map((quote) => {
@@ -327,14 +333,14 @@ export const duplicateQuote = (id) => {
   const original = getQuotes().find((quote) => quote.id === id);
   if (!original) return null;
 
-  const clone = {
+  const clone = withComputedTotals({
     ...original,
     id: crypto.randomUUID(),
     title: `${original.title} (cópia)`,
     status: 'Rascunho',
     createdAt: new Date().toISOString(),
     validUntil: original.validUntil,
-  };
+  });
 
   const updated = [clone, ...getQuotes()];
   persist(updated);

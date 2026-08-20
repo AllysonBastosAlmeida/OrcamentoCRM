@@ -15,7 +15,7 @@ export const showcaseNavGroups = [
   {
     id: 'comercial',
     label: 'Comercial',
-    heroImage: 'showcase-orcamentos-hero.jpg',
+    heroImage: 'showcase-orcamentos-hero-test.png',
     items: ['/', '/orcamentos', '/clientes'].map(findLink).filter(Boolean),
   },
   {
