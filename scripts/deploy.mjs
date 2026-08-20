@@ -1,8 +1,9 @@
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const isWindows = process.platform === 'win32';
 const git = isWindows ? 'git.exe' : 'git';
-const npx = isWindows ? 'npx.cmd' : 'npx';
+const ghPagesCli = fileURLToPath(new URL('../node_modules/gh-pages/bin/gh-pages.js', import.meta.url));
 
 const run = (command, args, options = {}) => {
   const result = spawnSync(command, args, {
@@ -61,6 +62,6 @@ if (stagedFiles) {
 }
 
 run(git, ['push', 'origin', 'main']);
-run(npx, ['gh-pages', '-d', 'dist']);
+run(process.execPath, [ghPagesCli, '-d', 'dist']);
 
 console.log('Codigo enviado para origin/main e site publicado no GitHub Pages.');
