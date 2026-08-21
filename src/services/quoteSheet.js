@@ -104,6 +104,7 @@ const sanitizeQuoteDetails = (quote) => ({
   category: quote?.category || "",
   discountValue: quote?.discountValue ?? 0,
   taxRate: quote?.taxRate ?? 0,
+  showItemValues: quote?.showItemValues === true,
   items: Array.isArray(quote?.items) ? quote.items : [],
   notes: quote?.notes || "",
   scope: quote?.scope || "",

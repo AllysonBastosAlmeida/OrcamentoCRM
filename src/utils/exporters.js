@@ -96,6 +96,87 @@ export const exportQuotesToExcel = async (quotes) => {
   downloadBlob(blob, 'orcamentos.xlsx');
 };
 
+export const exportQuoteDetailsToExcel = async (quote) => {
+  const XLSX = await loadXlsx();
+  const items = Array.isArray(quote?.items) ? quote.items : [];
+  const itemRows = items.map((item) => {
+    const quantity = toNumber(item.quantity);
+    const unitValue = toNumber(item.price);
+    return {
+      Descrição: item.name || '',
+      Tipo: item.type === 'materiais' ? 'Material' : item.type === 'servicos' ? 'Serviço' : item.type || 'Item',
+      Categoria: item.category || '',
+      SKU: item.sku || '',
+      Unidade: item.unit || '',
+      Quantidade: quantity,
+      'Valor unitário': unitValue,
+      'Valor total': quantity * unitValue,
+    };
+  });
+
+  const subtotal = items.length
+    ? itemRows.reduce((total, item) => total + item['Valor total'], 0)
+    : toNumber(quote?.subtotal ?? quote?.total);
+  const discount = toNumber(quote?.discountValue);
+  const taxRate = toNumber(quote?.taxRate);
+  const total = toNumber(quote?.total) || (subtotal - discount) * (1 + taxRate / 100);
+  const summaryRows = [
+    { Campo: 'PO', Valor: quote?.poNumber || '' },
+    { Campo: 'Projeto', Valor: quote?.title || '' },
+    { Campo: 'Cliente', Valor: quote?.clientCompany || quote?.clientName || '' },
+    { Campo: 'Contato', Valor: quote?.clientName || '' },
+    { Campo: 'E-mail', Valor: quote?.clientEmail || '' },
+    { Campo: 'Status', Valor: quote?.status || '' },
+    { Campo: 'Validade', Valor: formatDate(quote?.validUntil) },
+    { Campo: 'Subtotal', Valor: subtotal },
+    { Campo: 'Desconto', Valor: discount },
+    { Campo: 'Imposto (%)', Valor: taxRate },
+    { Campo: 'Total', Valor: total },
+    { Campo: 'Escopo', Valor: quote?.scope || '' },
+    { Campo: 'Premissas', Valor: quote?.notes || '' },
+  ];
+
+  const summarySheet = XLSX.utils.json_to_sheet(summaryRows);
+  const itemsSheet = XLSX.utils.json_to_sheet(itemRows.length ? itemRows : [{ Descrição: 'Nenhum item cadastrado' }]);
+  summarySheet['!cols'] = [{ wch: 18 }, { wch: 70 }];
+  itemsSheet['!cols'] = [
+    { wch: 48 },
+    { wch: 14 },
+    { wch: 24 },
+    { wch: 18 },
+    { wch: 12 },
+    { wch: 12 },
+    { wch: 16 },
+    { wch: 16 },
+  ];
+
+  itemRows.forEach((_, index) => {
+    const excelRow = index + 2;
+    ['G', 'H'].forEach((column) => {
+      const cell = itemsSheet[`${column}${excelRow}`];
+      if (cell) cell.z = 'R$ #,##0.00';
+    });
+  });
+  [9, 10, 12].forEach((excelRow) => {
+    const cell = summarySheet[`B${excelRow}`];
+    if (cell) cell.z = 'R$ #,##0.00';
+  });
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, summarySheet, 'Resumo');
+  XLSX.utils.book_append_sheet(workbook, itemsSheet, 'Materiais e Serviços');
+  const workbookData = XLSX.write(workbook, { bookType: 'xlsx', type: 'array', cellStyles: true });
+  const blob = new Blob([workbookData], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+  const safeName = (quote?.title || quote?.clientCompany || 'Orcamento')
+    .toString()
+    .trim()
+    .replace(/[<>:"/\\|?*]/g, '')
+    .replace(/\s+/g, ' ');
+  downloadBlob(blob, `${safeName || 'Orcamento'} - detalhes.xlsx`);
+};
+
 export const exportQuoteToPDF = async (quote, options = {}) => {
   const { download = true } = options;
   const { jsPDF, autoTable, PDFDocument, StandardFonts, degrees, rgb } = await loadPdfDeps();
@@ -159,6 +240,7 @@ export const exportQuoteToPDF = async (quote, options = {}) => {
   const taxValue = subtotal * (taxRate / 100);
   const computedTotal = (subtotal - discount) * (1 + taxRate / 100);
   const grandTotal = hasItems ? computedTotal : toNumber(quote.total ?? 0) || computedTotal;
+  const showItemValues = quote.showItemValues === true;
 
   doc.setFillColor(...palette.primary);
   doc.rect(0, 0, pageWidth, 34, 'F');
@@ -190,29 +272,47 @@ export const exportQuoteToPDF = async (quote, options = {}) => {
   doc.setFontSize(9);
   doc.text('Itens do orçamento', margin, cardsY + 40);
 
-  autoTable(doc, {
-    startY: cardsY + 46,
-    margin: { left: margin, right: margin },
-    head: [['Item', 'Categoria', 'SKU', 'Tipo', 'Quantidade']],
-    body: (quote.items || [])
-      .filter((item) => !isLaborItem(item))
-      .map((item) => [
+  const itemTableHead = ['Item', 'Categoria', 'SKU', 'Tipo', 'Quantidade'];
+  if (showItemValues) itemTableHead.push('Valor unitário');
+
+  const itemTableBody = (quote.items || [])
+    .filter((item) => !isLaborItem(item))
+    .map((item) => {
+      const row = [
         item.name || '--',
         item.type === 'materiais' ? 'Material' : item.type === 'servicos' ? 'Serviço' : '--',
         item.sku || '--',
         item.unit || '--',
         item.quantity,
-      ]),
+      ];
+      if (showItemValues) row.push(formatCurrency(item.price));
+      return row;
+    });
+
+  autoTable(doc, {
+    startY: cardsY + 46,
+    margin: { left: margin, right: margin },
+    head: [itemTableHead],
+    body: itemTableBody,
     styles: { fontSize: 8, cellPadding: 2, valign: 'middle', halign: 'left' },
     headStyles: { fillColor: palette.primaryLight, textColor: 255, fontStyle: 'bold', fontSize: 9, halign: 'left' },
     alternateRowStyles: { fillColor: [247, 249, 252] },
-    columnStyles: {
-      0: { cellWidth: contentWidth * 0.44 },
-      1: { cellWidth: contentWidth * 0.2 },
-      2: { cellWidth: contentWidth * 0.14 },
-      3: { cellWidth: contentWidth * 0.1 },
-      4: { halign: 'right', cellWidth: contentWidth * 0.12 },
-    },
+    columnStyles: showItemValues
+      ? {
+          0: { cellWidth: contentWidth * 0.34 },
+          1: { cellWidth: contentWidth * 0.17 },
+          2: { cellWidth: contentWidth * 0.13 },
+          3: { cellWidth: contentWidth * 0.09 },
+          4: { halign: 'right', cellWidth: contentWidth * 0.11 },
+          5: { halign: 'right', cellWidth: contentWidth * 0.16 },
+        }
+      : {
+          0: { cellWidth: contentWidth * 0.44 },
+          1: { cellWidth: contentWidth * 0.2 },
+          2: { cellWidth: contentWidth * 0.14 },
+          3: { cellWidth: contentWidth * 0.1 },
+          4: { halign: 'right', cellWidth: contentWidth * 0.12 },
+        },
     didDrawPage: () => {
       doc.setDrawColor(...palette.border);
     },

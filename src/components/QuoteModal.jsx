@@ -29,6 +29,7 @@ const defaultQuote = {
   poNumber: '',
   discountValue: 0,
   taxRate: 6,
+  showItemValues: false,
   items: [],
   notes: '',
   scope: '',
@@ -1779,6 +1780,22 @@ const QuoteModal = ({
                   onChange={(e) => handleChange('taxRate', Number(e.target.value))}
                   className="mt-1 w-full rounded-xl border border-white/15 bg-slate-900 px-3 py-1.5 text-xs sm:py-2 sm:text-sm text-white outline-none focus:border-primary/60"
                 />
+              </label>
+              <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-white/15 bg-slate-900/70 px-3 py-2.5 sm:col-span-3">
+                <input
+                  type="checkbox"
+                  checked={Boolean(form.showItemValues)}
+                  onChange={(e) => handleChange('showItemValues', e.target.checked)}
+                  className="mt-0.5 h-4 w-4 shrink-0 accent-blue-500"
+                />
+                <span>
+                  <span className="block text-xs font-semibold text-slate-200 sm:text-sm">
+                    Exibir valores dos itens no orçamento
+                  </span>
+                  <span className="mt-0.5 block text-[10px] font-normal text-slate-400 sm:text-[11px]">
+                    Adiciona ao PDF uma coluna com o valor unitário de cada material e serviço.
+                  </span>
+                </span>
               </label>
               <label className="block text-xs font-semibold text-slate-300 sm:col-span-3 sm:text-sm">
                 <span className="flex items-center justify-between gap-2">

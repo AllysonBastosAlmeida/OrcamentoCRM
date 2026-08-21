@@ -242,6 +242,7 @@ const groupBy = (arr, keySelector, valueSelector = () => 1) => {
 };
 
 const monthNames = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+const CARD_DETAILS_PAGE_SIZE = 8;
 
 const Dashboard = () => {
   const { quotes, refreshQuotes, syncInfo } = useQuotes();
@@ -250,6 +251,7 @@ const Dashboard = () => {
   const [selectedYear, setSelectedYear] = useState(null);
   const [showSheets, setShowSheets] = useState(false);
   const [selectedCardId, setSelectedCardId] = useState(null);
+  const [selectedCardPage, setSelectedCardPage] = useState(1);
   const [editingLayout, setEditingLayout] = useState(false);
   const [layoutDraftSnapshot, setLayoutDraftSnapshot] = useState(null);
   const [layouts, setLayouts] = useState(() => loadLayoutsFromStorage());
@@ -388,7 +390,8 @@ const Dashboard = () => {
     const grouped = new Map();
     filteredByYear.forEach((q) => {
       if (q.monthIndex === null) return;
-      if (normalizeText(q.approvalStatus) !== 'aprovado') return;
+      const status = normalizeText(q.approvalStatus);
+      if (status.includes('reprov') || !status.includes('aprov')) return;
       const key = q.monthIndex;
       grouped.set(key, (grouped.get(key) || 0) + q.totalNumber);
     });
@@ -480,16 +483,14 @@ const Dashboard = () => {
 
   const selectedCardDetails = useMemo(() => {
     if (!selectedCard) return null;
-    const list = [...(selectedCard.quotes || [])]
-      .sort((a, b) => {
+    const list = [...(selectedCard.quotes || [])].sort((a, b) => {
         const dateA = a.createdAt || a.validUntil || a.date;
         const dateB = b.createdAt || b.validUntil || b.date;
         const tA = dateA ? new Date(dateA).getTime() : 0;
         const tB = dateB ? new Date(dateB).getTime() : 0;
         if (!Number.isNaN(tA) && !Number.isNaN(tB) && tA !== tB) return tB - tA;
         return (b.totalNumber || 0) - (a.totalNumber || 0);
-      })
-      .slice(0, 12);
+      });
 
     const totalValue = (selectedCard.quotes || []).reduce((acc, q) => acc + (q.totalNumber || 0), 0);
     const totalQuotes = (selectedCard.quotes || []).length;
@@ -497,6 +498,23 @@ const Dashboard = () => {
 
     return { list, totalValue, totalQuotes, avgTicket };
   }, [selectedCard]);
+
+  const selectedCardTotalPages = Math.max(
+    1,
+    Math.ceil((selectedCardDetails?.list.length || 0) / CARD_DETAILS_PAGE_SIZE),
+  );
+  const selectedCardPageItems = selectedCardDetails?.list.slice(
+    (selectedCardPage - 1) * CARD_DETAILS_PAGE_SIZE,
+    selectedCardPage * CARD_DETAILS_PAGE_SIZE,
+  ) || [];
+
+  useEffect(() => {
+    setSelectedCardPage(1);
+  }, [selectedCardId]);
+
+  useEffect(() => {
+    if (selectedCardPage > selectedCardTotalPages) setSelectedCardPage(selectedCardTotalPages);
+  }, [selectedCardPage, selectedCardTotalPages]);
 
   useEffect(() => {
     if (!selectedCard) return undefined;
@@ -519,20 +537,6 @@ const Dashboard = () => {
       grouped.set(key, (grouped.get(key) || 0) + 1);
     });
     return monthNames.map((label, idx) => ({ key: `${label}/${selectedYear || ''}`.trim(), value: grouped.get(idx) || 0, monthIndex: idx }));
-  }, [filteredByYear, selectedYear]);
-
-  const valorMensal = useMemo(() => {
-    const grouped = new Map();
-    filteredByYear.forEach((q) => {
-      if (q.monthIndex === null) return;
-      const key = q.monthIndex;
-      grouped.set(key, (grouped.get(key) || 0) + q.totalNumber);
-    });
-    return monthNames.map((label, idx) => ({
-      key: `${label}/${selectedYear || ''}`.trim(),
-      value: grouped.get(idx) || 0,
-      monthIndex: idx,
-    }));
   }, [filteredByYear, selectedYear]);
 
   const handleExport = async (format) => {
@@ -571,7 +575,7 @@ const Dashboard = () => {
   ];
   const approvalStatusTotal = approvalPie.reduce((acc, entry) => acc + entry.value, 0);
 
-  const valorPorCategoria = groupBy(filteredByYear, (q) => q.category || 'Sem categoria', (q) => q.totalNumber);
+  const valorPorCategoria = groupBy(approved, (q) => q.category || 'Sem categoria', (q) => q.totalNumber);
   const valorPorAprovacao = groupBy(
     filteredByYear,
     (q) => {
@@ -901,15 +905,15 @@ const Dashboard = () => {
       minW: 2,
       minH: 4,
       content: renderPanelWidget({
-        title: 'Valor mensal do pipeline',
+        title: 'Valor mensal dos aprovados',
         badge: 'Radar executivo',
         content: renderExecutiveTrendPanel({
-          rows: valorMensal,
+          rows: valorMensalAprovado,
           valueFormatter: (value) => formatCurrency(value),
           heroLabel: 'Melhor mes do periodo',
-          totalLabel: 'Valor acumulado',
+          totalLabel: 'Valor aprovado acumulado',
           averageLabel: 'Media mensal',
-          emptyText: 'Nenhum valor mensal para exibir.',
+          emptyText: 'Nenhum orcamento aprovado no periodo.',
         }),
       }),
     },
@@ -928,12 +932,12 @@ const Dashboard = () => {
       minW: 2,
       minH: 4,
       content: renderPanelWidget({
-        title: 'Categorias com mais peso',
+        title: 'Categorias com mais peso nos aprovados',
         icon: <Filter className="widget-inline-icon" />,
         content: renderExecutiveDistributionPanel({
           rows: valorPorCategoria.sort((a, b) => b.value - a.value),
           valueFormatter: (value) => formatCurrency(value),
-          emptyText: 'Nenhuma categoria para exibir.',
+          emptyText: 'Nenhuma categoria com orcamento aprovado para exibir.',
         }),
       }),
     },
@@ -1115,28 +1119,51 @@ const Dashboard = () => {
                 {selectedCardDetails.list.length === 0 ? (
                   <p className="text-xs text-slate-400">Nenhum orcamento para este card no filtro atual.</p>
                 ) : (
-                  <div className="max-h-[40dvh] space-y-2 overflow-y-auto pr-1 sm:max-h-[45vh]">
-                    {selectedCardDetails.list.map((quote) => (
-                      <div
-                        key={quote.id}
-                        className="flex flex-col gap-2 rounded-lg border border-white/10 bg-black/20 px-2.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:px-3"
+                  <>
+                    <div className="max-h-[40dvh] space-y-2 overflow-y-auto pr-1 sm:max-h-[45vh]">
+                      {selectedCardPageItems.map((quote) => (
+                        <div
+                          key={quote.id}
+                          className="flex flex-col gap-2 rounded-lg border border-white/10 bg-black/20 px-2.5 py-2 sm:flex-row sm:items-center sm:justify-between sm:px-3"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate text-xs font-semibold text-white sm:text-sm">
+                              {quote.clientCompany || quote.clientName || 'Cliente'}
+                            </p>
+                            <p className="truncate text-[11px] text-slate-400 sm:text-xs">{quote.title || 'Sem titulo'}</p>
+                            <p className="text-[10px] text-slate-400 sm:text-[11px]">
+                              Status: {quote.status || '--'} | Aprovacao: {quote.approvalStatus || '--'}
+                            </p>
+                          </div>
+                          <div className="text-left sm:text-right">
+                            <p className="text-xs font-semibold text-white sm:text-sm">{formatCurrency(quote.totalNumber || 0)}</p>
+                            <p className="text-[10px] text-slate-400 sm:text-[11px]">{quote.createdAt || quote.validUntil || '--'}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-3 flex items-center justify-between gap-3 border-t border-white/10 pt-3">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedCardPage((page) => Math.max(1, page - 1))}
+                        disabled={selectedCardPage === 1}
+                        className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-slate-200 transition hover:border-primary/50 disabled:cursor-not-allowed disabled:opacity-40"
                       >
-                        <div className="min-w-0">
-                          <p className="truncate text-xs font-semibold text-white sm:text-sm">
-                            {quote.clientCompany || quote.clientName || 'Cliente'}
-                          </p>
-                          <p className="truncate text-[11px] text-slate-400 sm:text-xs">{quote.title || 'Sem titulo'}</p>
-                          <p className="text-[10px] text-slate-400 sm:text-[11px]">
-                            Status: {quote.status || '--'} | Aprovacao: {quote.approvalStatus || '--'}
-                          </p>
-                        </div>
-                        <div className="text-left sm:text-right">
-                          <p className="text-xs font-semibold text-white sm:text-sm">{formatCurrency(quote.totalNumber || 0)}</p>
-                          <p className="text-[10px] text-slate-400 sm:text-[11px]">{quote.createdAt || quote.validUntil || '--'}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                        Anterior
+                      </button>
+                      <span className="text-xs text-slate-400">
+                        Pagina {selectedCardPage} de {selectedCardTotalPages} · {selectedCardDetails.totalQuotes} orcamentos
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedCardPage((page) => Math.min(selectedCardTotalPages, page + 1))}
+                        disabled={selectedCardPage === selectedCardTotalPages}
+                        className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-slate-200 transition hover:border-primary/50 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        Proxima
+                      </button>
+                    </div>
+                  </>
                 )}
               </div>
             </div>

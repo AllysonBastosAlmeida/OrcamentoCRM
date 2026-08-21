@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowDown, ArrowUp, ArrowUpDown, BadgePercent, Copy, FileDown, Mail, Pencil, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, BadgePercent, Copy, FileDown, FileSpreadsheet, Mail, Pencil, Trash2 } from 'lucide-react';
 import { formatCurrency, formatDate, statusBadgeClass } from '../utils/formatters.js';
 import { calculateQuoteProfitability } from '../utils/profitability.js';
 
@@ -50,11 +50,25 @@ const QuotesTable = ({
 
   const handleExportPdf = async (quote) => {
     const quoteKey = String(quote?.id || quote?.poNumber || '');
-    if (!quoteKey || exportingQuoteKey === quoteKey) return;
+    const exportKey = `pdf:${quoteKey}`;
+    if (!quoteKey || exportingQuoteKey) return;
     try {
-      setExportingQuoteKey(quoteKey);
+      setExportingQuoteKey(exportKey);
       const { exportQuoteToPDF } = await import('../utils/exporters.js');
       await exportQuoteToPDF(quote);
+    } finally {
+      setExportingQuoteKey(null);
+    }
+  };
+
+  const handleExportExcel = async (quote) => {
+    const quoteKey = String(quote?.id || quote?.poNumber || '');
+    const exportKey = `excel:${quoteKey}`;
+    if (!quoteKey || exportingQuoteKey) return;
+    try {
+      setExportingQuoteKey(exportKey);
+      const { exportQuoteDetailsToExcel } = await import('../utils/exporters.js');
+      await exportQuoteDetailsToExcel(quote);
     } finally {
       setExportingQuoteKey(null);
     }
@@ -119,7 +133,8 @@ const QuotesTable = ({
           (() => {
             const margin = getMarginValue(quote);
             const quoteKey = String(quote.id || quote.poNumber || '');
-            const isExportingPdf = exportingQuoteKey === quoteKey;
+            const isExportingPdf = exportingQuoteKey === `pdf:${quoteKey}`;
+            const isExportingExcel = exportingQuoteKey === `excel:${quoteKey}`;
             return (
           <div
             key={quote.id || quote.poNumber || `quote-${idx}`}
@@ -169,6 +184,14 @@ const QuotesTable = ({
                     disabled={isExportingPdf}
                   >
                     <FileDown className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    className="rounded-lg border border-white/10 p-1 text-slate-200 hover:border-emerald-400/50 hover:text-emerald-100"
+                    onClick={() => handleExportExcel(quote)}
+                    title="Baixar Excel detalhado"
+                    disabled={isExportingExcel}
+                  >
+                    <FileSpreadsheet className="h-3.5 w-3.5" />
                   </button>
                   <button
                     className="rounded-lg border border-white/10 p-1 text-slate-200 hover:border-amber-500/50 hover:text-amber-200"
@@ -239,7 +262,8 @@ const QuotesTable = ({
             {(quotes || []).map((quote, idx) => {
               const margin = getMarginValue(quote);
               const quoteKey = String(quote.id || quote.poNumber || '');
-              const isExportingPdf = exportingQuoteKey === quoteKey;
+                const isExportingPdf = exportingQuoteKey === `pdf:${quoteKey}`;
+                const isExportingExcel = exportingQuoteKey === `excel:${quoteKey}`;
               return (
               <tr key={quote.id || quote.poNumber || `quote-${idx}`} className="hover:bg-white/5">
                 <td className="px-2 py-2 text-white align-top">
@@ -301,6 +325,14 @@ const QuotesTable = ({
                       disabled={isExportingPdf}
                     >
                       <FileDown className="h-2.5 w-2.5" />
+                    </button>
+                    <button
+                      className={`${actionButtonClass} hover:border-emerald-400/50 hover:text-emerald-100 ${isExportingExcel ? 'cursor-not-allowed opacity-60' : ''}`}
+                      onClick={() => handleExportExcel(quote)}
+                      title="Baixar Excel detalhado"
+                      disabled={isExportingExcel}
+                    >
+                      <FileSpreadsheet className="h-2.5 w-2.5" />
                     </button>
                     <button
                       className={`${actionButtonClass} hover:border-amber-500/50 hover:text-amber-200`}
