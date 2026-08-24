@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, ChevronLeft, ChevronRight, CircleHelp, Maximize2, Pencil, Plus, RefreshCw, Sparkles, Trash2, Users, X } from 'lucide-react';
+import { AlertTriangle, Check, ChevronLeft, ChevronRight, CircleHelp, Maximize2, Pencil, Plus, RefreshCw, Sparkles, Trash2, Users, X } from 'lucide-react';
 import { computeQuoteTotals } from '../services/quotes.js';
 import { getEmployees } from '../services/employees.js';
 import { getResolvedProductServiceReference } from '../services/api.js';
@@ -460,6 +460,7 @@ const QuoteModal = ({
   const [categoryScopes, setCategoryScopes] = useState(readCategoryScopeTemplates);
   const [laborForm, setLaborForm] = useState({});
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
+  const [itemValuesConfirmOpen, setItemValuesConfirmOpen] = useState(false);
   const [showValidation, setShowValidation] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [draftMeta, setDraftMeta] = useState(null);
@@ -580,6 +581,7 @@ const QuoteModal = ({
     setImportError('');
     setEditingItemKey(null);
     setCloseConfirmOpen(false);
+    setItemValuesConfirmOpen(false);
     setDraftMeta(
       draftKey
         ? {
@@ -759,6 +761,10 @@ const QuoteModal = ({
         setCloseConfirmOpen(false);
         return;
       }
+      if (itemValuesConfirmOpen) {
+        setItemValuesConfirmOpen(false);
+        return;
+      }
       if (scopeHelpOpen) {
         closeScopeHelp();
         return;
@@ -775,7 +781,7 @@ const QuoteModal = ({
     };
     window.addEventListener('keydown', handleKeydown);
     return () => window.removeEventListener('keydown', handleKeydown);
-  }, [open, isSaving, laborModalOpen, closeConfirmOpen, scopeHelpOpen, assumptionsOpen, requestClose]);
+  }, [open, isSaving, laborModalOpen, closeConfirmOpen, itemValuesConfirmOpen, scopeHelpOpen, assumptionsOpen, requestClose]);
 
   const hasClient = Boolean(selectedClientId || form.clientCompany || form.clientName);
   const hasInternalContact = Boolean(form.contactName && form.contactName.trim());
@@ -990,6 +996,26 @@ const QuoteModal = ({
       message: `${preview.summary.matchedCount} material(is) com match forte, ${preview.summary.reviewCount} para revisao e ${preview.summary.derivedServicesCount} servico(s) sugerido(s).`,
       type: 'success',
       duration: 3500,
+    });
+  };
+
+  const handleRemoveImportMatch = (entryId) => {
+    setImportPreview((currentPreview) => {
+      const nextPreview = currentPreview.filter((entry) => entry.id !== entryId);
+
+      setImportSummary(
+        nextPreview.length
+          ? {
+              totalLines: nextPreview.length,
+              matchedCount: nextPreview.filter((entry) => entry.status === 'matched').length,
+              reviewCount: nextPreview.filter((entry) => entry.status === 'review').length,
+              unmatchedCount: nextPreview.filter((entry) => entry.status === 'unmatched').length,
+              derivedServicesCount: nextPreview.filter((entry) => entry.derivedService?.suggestedItem).length,
+            }
+          : null,
+      );
+
+      return nextPreview;
     });
   };
 
@@ -1785,7 +1811,13 @@ const QuoteModal = ({
                 <input
                   type="checkbox"
                   checked={Boolean(form.showItemValues)}
-                  onChange={(e) => handleChange('showItemValues', e.target.checked)}
+                  onChange={(event) => {
+                    if (event.target.checked) {
+                      setItemValuesConfirmOpen(true);
+                      return;
+                    }
+                    handleChange('showItemValues', false);
+                  }}
                   className="mt-0.5 h-4 w-4 shrink-0 accent-blue-500"
                 />
                 <span>
@@ -2075,9 +2107,20 @@ const QuoteModal = ({
                             <p className="text-[11px] font-semibold text-white sm:text-xs">{entry.rawLine}</p>
                             <p className="mt-1 text-[10px] text-slate-400 sm:text-[11px]">Solicitado: {entry.requestedLabel}</p>
                           </div>
-                          <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${badgeClass}`}>
-                            {entry.status === 'matched' ? 'Match forte' : entry.status === 'review' ? 'Revisar' : 'Sem match'}
-                          </span>
+                          <div className="flex shrink-0 items-center gap-2">
+                            <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${badgeClass}`}>
+                              {entry.status === 'matched' ? 'Match forte' : entry.status === 'review' ? 'Revisar' : 'Sem match'}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveImportMatch(entry.id)}
+                              className="flex h-8 w-8 items-center justify-center rounded-lg border border-rose-300/20 bg-rose-500/10 text-rose-200 transition hover:border-rose-300/40 hover:bg-rose-500/20 hover:text-rose-100 focus:outline-none focus:ring-2 focus:ring-rose-400/30"
+                              aria-label={`Remover ${entry.rawLine} da lista de matches`}
+                              title="Remover da lista"
+                            >
+                              <Trash2 className="h-4 w-4" aria-hidden="true" />
+                            </button>
+                          </div>
                         </div>
 
                         {entry.bestMatch ? (
@@ -2592,6 +2635,54 @@ const QuoteModal = ({
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {itemValuesConfirmOpen && !isSaving && (
+        <div
+          className="cyber-overlay fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/85 px-4 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (event.target !== event.currentTarget) return;
+            setItemValuesConfirmOpen(false);
+          }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="item-values-confirm-title"
+        >
+          <div
+            className="cyber-dialog w-full max-w-md rounded-2xl border border-rose-400/45 bg-slate-950 p-4 shadow-[0_0_45px_rgba(244,63,94,0.22)] sm:p-5"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-rose-400/40 bg-rose-500/15 text-rose-300">
+                <AlertTriangle className="h-6 w-6" aria-hidden="true" />
+              </div>
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-rose-300">Atenção crítica</p>
+                <h4 id="item-values-confirm-title" className="mt-1 text-base font-semibold text-white sm:text-lg">
+                  Exibir valores unitários na proposta?
+                </h4>
+              </div>
+            </div>
+            <p className="mt-4 text-xs leading-relaxed text-slate-200 sm:text-sm">
+              Ao confirmar, o valor unitário de cada material e serviço será exibido na proposta enviada ao cliente e no PDF. Deseja realmente ativar esta opção?
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" className="btn-secondary" onClick={() => setItemValuesConfirmOpen(false)}>
+                Não
+              </button>
+              <button
+                type="button"
+                className="rounded-xl border border-rose-300/40 bg-rose-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-rose-500 focus:outline-none focus:ring-2 focus:ring-rose-400/40 sm:text-sm"
+                onClick={() => {
+                  handleChange('showItemValues', true);
+                  setItemValuesConfirmOpen(false);
+                }}
+              >
+                Sim, exibir valores
+              </button>
             </div>
           </div>
         </div>
