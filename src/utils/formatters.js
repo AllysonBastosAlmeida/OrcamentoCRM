@@ -10,7 +10,9 @@ export const statusBadgeClass = (status) => {
   const normalized = status?.toLowerCase();
   if (normalized === 'aprovado') return 'badge-success';
   if (normalized === 'enviado') return 'badge-info';
+  if (normalized === 'concluído' || normalized === 'concluido') return 'badge-complete';
+  if (normalized === 'reprovado' || normalized === 'perdido') return 'badge-danger';
+  if (normalized === 'aguardando') return 'badge-info';
   if (normalized === 'rascunho') return 'badge-warning';
-  if (normalized === 'perdido') return 'badge bg-rose-500/20 text-rose-200';
   return 'badge bg-slate-500/20 text-slate-200';
 };

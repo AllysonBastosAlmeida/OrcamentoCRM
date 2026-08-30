@@ -14,9 +14,14 @@ import { getAuditLog } from '../utils/audit.js';
 import { useToast } from '../components/ToastHost.jsx';
 import { createQuoteDraft } from '../services/mail.js';
 import { calculateQuoteProfitability } from '../utils/profitability.js';
+import { getCurrentUser } from '../utils/userSession.js';
 
 const FILTERS_KEY = 'crm-orcamentos:orcamentos-filters';
-const DEFAULT_EMAIL_CC = 'contato@cleverconnection.com.br';
+const INTERNAL_EMAIL_CC = [
+  'contato@cleverconnection.com.br',
+  'allyson.bastos@cleverconnection.com.br',
+  'gilson.caires@cleverconnection.com.br',
+];
 const QuoteModal = lazy(() => import('../components/QuoteModal.jsx'));
 const ExportButtons = lazy(() => import('../components/ExportButtons.jsx'));
 const DEFAULT_MODAL_LAUNCH = Object.freeze({
@@ -29,6 +34,11 @@ const normalizeEmailText = (value) =>
     .toString()
     .replace(/\s+/g, ' ')
     .trim();
+
+const buildDefaultEmailCc = () => {
+  const senderEmail = (getCurrentUser()?.email || '').trim().toLowerCase();
+  return INTERNAL_EMAIL_CC.filter((email) => email.toLowerCase() !== senderEmail).join('; ');
+};
 
 const normalizeLookupKey = (value) =>
   normalizeEmailText(value)
@@ -159,7 +169,7 @@ const buildEmailDraft = (quote) => {
   const body = renderEmailText(content);
   return {
     to: content.to,
-    cc: DEFAULT_EMAIL_CC,
+    cc: buildDefaultEmailCc(),
     subject: content.subject,
     body,
     template: {
@@ -169,9 +179,6 @@ const buildEmailDraft = (quote) => {
     },
   };
 };
-
-const buildMailtoUrl = ({ to, subject, body }) =>
-  `mailto:${encodeURIComponent(to || '')}?subject=${encodeURIComponent(subject || '')}&body=${encodeURIComponent(body || '')}`;
 
 const buildEmailPreviewHtml = (draft) => {
   if (!draft) return '';
@@ -349,7 +356,7 @@ const buildEmailHtml = ({ subject, body }) => {
 const formatPercent = (value) => `${Number(value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
 
 const Orcamentos = () => {
-  const { quotes, syncInfo, addQuote, editQuote, editApproval, removeQuote, refreshQuotes } = useQuotes();
+  const { quotes, syncInfo, addQuote, editQuote, editApproval, editCondition, removeQuote, refreshQuotes } = useQuotes();
   const materiais = useProducts(graphConfig.sheetMateriais);
   const servicos = useProducts(graphConfig.sheetServicos);
   const { clients, loading: loadingClients, error: clientsError } = useClients();
@@ -492,7 +499,11 @@ const Orcamentos = () => {
 
   const handleApprovalChange = async (quote, nextStatus) => {
     if (!quote) return;
-    const current = normalizeApproval(quote.approvalStatus);
+    const isCompleted = normalizeApproval(nextStatus).includes('conclu');
+    const quoteIsCompleted = normalizeApproval(quote.condition).includes('conclu');
+    const current = quoteIsCompleted
+      ? 'concluido'
+      : normalizeApproval(quote.approvalStatus);
     const next = normalizeApproval(nextStatus);
     if (current === next) return;
     if (updatingApproval) return;
@@ -505,9 +516,12 @@ const Orcamentos = () => {
     const key = quote.poNumber || quote.id;
     setUpdatingApproval(key);
     try {
-      const updated = await editApproval(quote, nextStatus);
+      const isCompleted = normalizeApproval(nextStatus).includes('conclu');
+      const updated = isCompleted
+        ? await editCondition(quote, 'Concluído')
+        : await editApproval(quote, nextStatus);
       pushToast({
-        title: 'Aprovacao atualizada',
+        title: isCompleted ? 'Orçamento concluído' : 'Aprovação atualizada',
         message: `${updated?.clientCompany || updated?.clientName || quote?.title || 'Orcamento'} agora esta como ${nextStatus}.`,
         type: 'success',
       });
@@ -530,7 +544,9 @@ const Orcamentos = () => {
     const filtered = quotes.filter((quote) => {
       const matchesApproval =
         approvalFilter === 'Todos' ||
-        normalizeApproval(quote.approvalStatus) === normalizeApproval(approvalFilter);
+        (normalizeApproval(approvalFilter).includes('conclu')
+          ? normalizeApproval(quote.condition).includes('conclu')
+          : normalizeApproval(quote.approvalStatus) === normalizeApproval(approvalFilter));
       const clientLabel = quote.clientCompany || quote.clientName || '';
       const matchesClient =
         clientFilter === 'Todos' ||
@@ -823,11 +839,6 @@ const Orcamentos = () => {
     }
   };
 
-  const openEmailClient = () => {
-    if (!emailDraft) return;
-    window.open(buildMailtoUrl(emailDraft), '_blank');
-  };
-
   const openEmailWithAttachment = async () => {
     if (!emailDraft) return;
     if (!emailDraft.to?.trim()) {
@@ -856,7 +867,7 @@ const Orcamentos = () => {
       const useTemplateHtml = emailDraft.template?.body?.trim() === trimmedBody;
       await createQuoteDraft({
         to: emailDraft.to.trim(),
-        cc: emailDraft.cc?.trim() || DEFAULT_EMAIL_CC,
+        cc: emailDraft.cc?.trim() || buildDefaultEmailCc(),
         subject: trimmedSubject,
         body: trimmedBody,
         bodyHtml: useTemplateHtml
@@ -992,6 +1003,7 @@ const Orcamentos = () => {
                 <option>Aguardando</option>
                 <option>Aprovado</option>
                 <option>Reprovado</option>
+                <option>Concluído</option>
               </select>
             </div>
             <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-2 py-1 sm:px-2.5 sm:py-1.5">
@@ -1216,10 +1228,10 @@ const Orcamentos = () => {
             className="cyber-dialog w-full max-w-sm rounded-2xl border border-white/10 bg-slate-900 p-4 shadow-2xl sm:p-5"
             onMouseDown={(event) => event.stopPropagation()}
           >
-            <p className="text-[11px] uppercase tracking-wide text-slate-400">Alterar aprovacao</p>
+            <p className="text-[11px] uppercase tracking-wide text-slate-400">Alterar situação</p>
             <h3 className="text-base font-semibold text-white sm:text-lg">Confirmar mudanca</h3>
             <p className="mt-2 text-xs text-slate-300 sm:text-sm">
-              Deseja alterar a aprovacao do orcamento{' '}
+              Deseja alterar a situação do orçamento{' '}
               <span className="font-semibold text-white">PO {approvalConfirm.quote?.poNumber || '--'}</span> para{' '}
               <span className="font-semibold text-white">{approvalConfirm.nextStatus}</span>?
             </p>
@@ -1327,7 +1339,7 @@ const Orcamentos = () => {
                   <label className="block text-[11px] font-semibold text-slate-300 sm:text-xs">
                     Cópia
                     <input
-                      value={emailDraft.cc || DEFAULT_EMAIL_CC}
+                      value={emailDraft.cc || buildDefaultEmailCc()}
                       readOnly
                       className="mt-1 w-full rounded-xl border border-white/10 bg-slate-950/80 px-3 py-2 text-[13px] text-slate-300 outline-none"
                     />

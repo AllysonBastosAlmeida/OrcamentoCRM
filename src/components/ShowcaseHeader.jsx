@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, FileDown, Menu, Plus } from 'lucide-react';
+import { ChevronDown, FileDown, Menu, PanelTop, Plus } from 'lucide-react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { findShowcaseGroupByPath, showcaseNavGroups } from './navLinks.js';
 
@@ -39,12 +39,11 @@ const pageMeta = {
 const ShowcaseHeader = ({
   appTitle,
   currentPath,
-  user,
   onMenuClick,
   onCreateQuote,
   onOpenReports,
   onSelectSubsection,
-  onRequestLegacyTheme,
+  onUseNewInterface,
 }) => {
   const navigate = useNavigate();
   const meta = pageMeta[currentPath] || pageMeta['/'];
@@ -139,11 +138,6 @@ const ShowcaseHeader = ({
       resizeObserver?.disconnect();
     };
   }, []);
-
-  useEffect(() => {
-    setHoveredGroupId(null);
-    setHoveredSubPath(null);
-  }, [currentPath]);
 
   useEffect(() => {
     if (!openGroupId) {
@@ -250,19 +244,18 @@ const ShowcaseHeader = ({
             ) : null}
           </div>
 
-          <div className="showcase-nav-actions" />
+          <div className="showcase-nav-actions">
+            <button type="button" className="showcase-outline-btn" onClick={onUseNewInterface} title="Abrir nova interface">
+              <PanelTop className="h-4 w-4" />
+              <span className="hidden xl:inline">Nova interface</span>
+            </button>
+          </div>
         </div>
       </div>
 
       <div className="showcase-landing-content">
         <div className="showcase-hero-copy showcase-hero-copy-landing">
-          <p
-            className="showcase-eyebrow"
-            onDoubleClick={onRequestLegacyTheme}
-            title="Duplo clique para abrir o tema antigo"
-          >
-            {meta.eyebrow}
-          </p>
+          <p className="showcase-eyebrow">{meta.eyebrow}</p>
           <h1 className="showcase-hero-title">
             {heroTitle.map((line) => (
               <span key={line} className="showcase-hero-title-line">

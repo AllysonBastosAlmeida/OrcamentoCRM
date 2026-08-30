@@ -60,7 +60,7 @@ export const ToastProvider = ({ children }) => {
         {toasts.map((toast) => (
           <div
             key={toast.id}
-            className={`rounded-2xl border bg-slate-950/95 px-3 py-2.5 text-xs text-white shadow-2xl backdrop-blur ${toneClassFor(toast.type)}`}
+            className={`app-toast rounded-2xl border bg-slate-950/95 px-3 py-2.5 text-xs text-white shadow-2xl backdrop-blur ${toneClassFor(toast.type)}`}
           >
             <div className="flex items-start gap-2">
               <div className="mt-0.5">{iconFor(toast.type)}</div>

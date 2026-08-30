@@ -1,16 +1,20 @@
-import mockQuotes from '../data/mockQuotes.js';
 import {
   appendQuoteRow,
   deleteQuoteRow,
   hasQuoteSheetConfig,
   updateQuoteApprovalStatus,
+  updateQuoteConditionStatus,
   updateQuoteRow,
 } from './quoteSheet.js';
 import { getCurrentUser } from '../utils/userSession.js';
 import { appendAuditEntry } from '../utils/audit.js';
 
 const STORAGE_KEY = 'crm-orcamentos:quotes';
+const LEGACY_DEMO_QUOTE_IDS = new Set(['orc-001', 'orc-002', 'orc-003']);
 let quotesCache = null;
+
+const removeLegacyDemoQuotes = (quotes) =>
+  (Array.isArray(quotes) ? quotes : []).filter((quote) => !LEGACY_DEMO_QUOTE_IDS.has(quote?.id));
 
 const formatAuditCurrency = (value) =>
   new Intl.NumberFormat('pt-BR', {
@@ -124,14 +128,18 @@ export const getQuotes = () => {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
-      quotesCache = JSON.parse(stored);
+      const storedQuotes = JSON.parse(stored);
+      quotesCache = removeLegacyDemoQuotes(storedQuotes);
+      if (quotesCache.length !== (Array.isArray(storedQuotes) ? storedQuotes.length : 0)) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(quotesCache));
+      }
       return quotesCache;
     }
   } catch (error) {
     console.warn('Falha ao ler orçamentos, usando mocks.', error);
   }
 
-  quotesCache = mockQuotes;
+  quotesCache = [];
   return quotesCache;
 };
 
@@ -270,6 +278,7 @@ export const updateQuoteApproval = async (quoteOrId, approvalStatus) => {
   const targetPo = baseQuote?.poNumber;
   let updatedQuote = null;
   let previousQuote = null;
+  const synchronizedStatus = approvalStatus?.toString().toLowerCase().includes('aguard') ? 'Enviado' : approvalStatus;
 
   const quotes = getQuotes().map((quote) => {
     const matches =
@@ -279,6 +288,8 @@ export const updateQuoteApproval = async (quoteOrId, approvalStatus) => {
     updatedQuote = {
       ...quote,
       approvalStatus,
+      status: synchronizedStatus,
+      condition: '',
       updatedBy: user.name || quote.updatedBy || '',
       updatedByEmail: user.email || quote.updatedByEmail || '',
       updatedAt: now,
@@ -291,6 +302,8 @@ export const updateQuoteApproval = async (quoteOrId, approvalStatus) => {
     updatedQuote = {
       ...baseQuote,
       approvalStatus,
+      status: synchronizedStatus,
+      condition: '',
       updatedBy: user.name || baseQuote.updatedBy || '',
       updatedByEmail: user.email || baseQuote.updatedByEmail || '',
       updatedAt: now,
@@ -305,6 +318,7 @@ export const updateQuoteApproval = async (quoteOrId, approvalStatus) => {
     if (poNumber) {
       try {
         await updateQuoteApprovalStatus(poNumber, approvalStatus);
+        await updateQuoteConditionStatus(poNumber, '', false);
       } catch (error) {
         console.warn('Falha ao atualizar aprovacao na planilha', error);
       }
@@ -326,6 +340,47 @@ export const updateQuoteApproval = async (quoteOrId, approvalStatus) => {
     });
   }
 
+  return updatedQuote;
+};
+
+export const updateQuoteCondition = async (quoteOrId, condition) => {
+  const user = getUserMeta();
+  const now = new Date().toISOString();
+  const baseQuote = typeof quoteOrId === 'object' && quoteOrId ? quoteOrId : null;
+  const id = baseQuote ? baseQuote.id : quoteOrId;
+  const targetPo = baseQuote?.poNumber;
+  let updatedQuote = null;
+
+  const quotes = getQuotes().map((quote) => {
+    const matches = (id && quote.id === id) || (targetPo && quote.poNumber?.toString() === targetPo.toString());
+    if (!matches) return quote;
+    updatedQuote = { ...quote, condition, status: condition, updatedBy: user.name || quote.updatedBy || '', updatedByEmail: user.email || quote.updatedByEmail || '', updatedAt: now };
+    return updatedQuote;
+  });
+
+  if (!updatedQuote && baseQuote) {
+    updatedQuote = { ...baseQuote, condition, status: condition, updatedBy: user.name || baseQuote.updatedBy || '', updatedByEmail: user.email || baseQuote.updatedByEmail || '', updatedAt: now };
+    quotes.unshift(updatedQuote);
+  }
+  persist(quotes);
+
+  if (hasQuoteSheetConfig && (updatedQuote?.poNumber || targetPo)) {
+    await updateQuoteConditionStatus(updatedQuote?.poNumber || targetPo, condition);
+  }
+
+  if (updatedQuote) {
+    appendAuditEntry({
+      action: 'approval',
+      poNumber: updatedQuote.poNumber,
+      title: updatedQuote.title,
+      clientCompany: quoteClientLabel(updatedQuote),
+      userName: user.name,
+      userEmail: user.email,
+      source: updatedQuote.source,
+      summary: `Condicao alterada para ${condition || '--'}.`,
+      details: [`Condicao: ${condition || '--'}`],
+    });
+  }
   return updatedQuote;
 };
 

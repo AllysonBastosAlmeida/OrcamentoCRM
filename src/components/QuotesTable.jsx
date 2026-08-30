@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { ArrowDown, ArrowUp, ArrowUpDown, BadgePercent, Copy, FileDown, FileSpreadsheet, Mail, Pencil, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, BadgePercent, Copy, FileDown, FileSpreadsheet, Mail, MoreHorizontal, Pencil, Trash2, X } from 'lucide-react';
 import { formatCurrency, formatDate, statusBadgeClass } from '../utils/formatters.js';
 import { calculateQuoteProfitability } from '../utils/profitability.js';
+import ModalPortal from './ModalPortal.jsx';
 
 const normalizeApproval = (value) =>
   value
@@ -15,9 +16,12 @@ const approvalOptions = [
   { key: 'aguardando', label: 'Aguardando', color: 'bg-amber-400' },
   { key: 'aprovado', label: 'Aprovado', color: 'bg-emerald-400' },
   { key: 'reprovado', label: 'Reprovado', color: 'bg-rose-500' },
+  { key: 'concluido', label: 'Concluído', color: 'bg-sky-500' },
 ];
 
-const resolveApprovalKey = (value) => {
+const resolveApprovalKey = (value, condition) => {
+  const normalizedCondition = normalizeApproval(condition);
+  if (normalizedCondition?.includes('conclu')) return 'concluido';
   const normalized = normalizeApproval(value);
   if (!normalized) return 'aguardando';
   if (normalized.includes('reprov')) return 'reprovado';
@@ -44,9 +48,8 @@ const QuotesTable = ({
   onApprovalChange,
   updatingApproval,
 }) => {
-  const actionButtonClass =
-    'rounded-lg border border-white/10 p-[3px] text-slate-200 transition hover:bg-white/5';
   const [exportingQuoteKey, setExportingQuoteKey] = useState(null);
+  const [actionQuote, setActionQuote] = useState(null);
 
   const handleExportPdf = async (quote) => {
     const quoteKey = String(quote?.id || quote?.poNumber || '');
@@ -98,14 +101,16 @@ const QuotesTable = ({
   );
 
   const renderApprovalDots = (quote) => {
-    const currentKey = resolveApprovalKey(quote?.approvalStatus);
+    const currentKey = resolveApprovalKey(quote?.approvalStatus, quote?.condition);
+    const currentOption = approvalOptions.find((option) => option.key === currentKey) || approvalOptions[0];
     const isUpdating =
       (updatingApproval || updatingApproval === 0) &&
       (quote?.poNumber || quote?.id) &&
       String(quote.poNumber || quote.id) === String(updatingApproval);
     return (
-      <div className="flex items-center gap-1">
-        {approvalOptions.map((option) => {
+      <div className="flex min-w-0 items-center" aria-label={`Situação atual: ${currentOption.label}`}>
+        <div className="flex items-center gap-1.5">
+          {approvalOptions.map((option) => {
           const isActive = option.key === currentKey;
           return (
             <button
@@ -114,19 +119,28 @@ const QuotesTable = ({
               title={option.label}
               onClick={() => onApprovalChange && onApprovalChange(quote, option.label)}
               disabled={!onApprovalChange || isUpdating}
-              className={`h-3 w-3 rounded-full ${option.color} ${
+              className={`h-3.5 w-3.5 rounded-full ${option.color} transition ${
                 isActive
-                  ? 'ring-2 ring-white/80 ring-offset-2 ring-offset-slate-950 shadow-[0_0_8px_rgba(255,255,255,0.35)] animate-pulse'
-                  : 'opacity-70 hover:opacity-100'
+                  ? 'scale-110 ring-2 ring-slate-600 ring-offset-2 ring-offset-white shadow-sm'
+                  : 'opacity-45 hover:scale-105 hover:opacity-100'
               } ${!onApprovalChange || isUpdating ? 'cursor-not-allowed opacity-40' : ''}`}
               aria-label={option.label}
+              aria-pressed={isActive}
             />
           );
-        })}
+          })}
+        </div>
       </div>
     );
   };
+  const runAction = (callback) => {
+    const selectedQuote = actionQuote;
+    setActionQuote(null);
+    callback?.(selectedQuote);
+  };
+
   return (
+    <>
     <div className="card overflow-hidden">
       <div className="md:hidden">
         {(quotes || []).map((quote, idx) => (
@@ -226,14 +240,14 @@ const QuotesTable = ({
       <div className="hidden overflow-x-auto md:block">
         <table className="table w-full table-fixed text-[11px]">
           <colgroup>
-            <col className="w-[8%]" />
+            <col className="w-[7%]" />
+            <col className="w-[18%]" />
             <col className="w-[20%]" />
-            <col className="w-[22%]" />
-            <col className="w-[11%]" />
-            <col className="w-[6%]" />
             <col className="w-[10%]" />
             <col className="w-[6%]" />
-            <col className="w-[7%]" />
+            <col className="w-[9%]" />
+            <col className="w-[12%]" />
+            <col className="w-[8%]" />
             <col className="w-[10%]" />
           </colgroup>
           <thead className="bg-white/5">
@@ -261,9 +275,6 @@ const QuotesTable = ({
           <tbody>
             {(quotes || []).map((quote, idx) => {
               const margin = getMarginValue(quote);
-              const quoteKey = String(quote.id || quote.poNumber || '');
-                const isExportingPdf = exportingQuoteKey === `pdf:${quoteKey}`;
-                const isExportingExcel = exportingQuoteKey === `excel:${quoteKey}`;
               return (
               <tr key={quote.id || quote.poNumber || `quote-${idx}`} className="hover:bg-white/5">
                 <td className="px-2 py-2 text-white align-top">
@@ -303,59 +314,9 @@ const QuotesTable = ({
                   </span>
                 </td>
                 <td className="px-2 py-2 align-top">
-                  <div className="mx-auto grid w-fit grid-cols-3 gap-0.5">
-                    <button
-                      className={`${actionButtonClass} hover:border-primary/50 hover:text-white`}
-                      onClick={() => onEdit(quote)}
-                      title="Editar"
-                    >
-                      <Pencil className="h-2.5 w-2.5" />
-                    </button>
-                    <button
-                      className={`${actionButtonClass} hover:border-emerald-500/50 hover:text-emerald-200`}
-                      onClick={() => onDuplicate && onDuplicate(quote)}
-                      title="Duplicar"
-                    >
-                      <Copy className="h-2.5 w-2.5" />
-                    </button>
-                    <button
-                      className={`${actionButtonClass} hover:border-amber-400/50 hover:text-amber-100 ${isExportingPdf ? 'cursor-not-allowed opacity-60' : ''}`}
-                      onClick={() => handleExportPdf(quote)}
-                      title="Exportar PDF"
-                      disabled={isExportingPdf}
-                    >
-                      <FileDown className="h-2.5 w-2.5" />
-                    </button>
-                    <button
-                      className={`${actionButtonClass} hover:border-emerald-400/50 hover:text-emerald-100 ${isExportingExcel ? 'cursor-not-allowed opacity-60' : ''}`}
-                      onClick={() => handleExportExcel(quote)}
-                      title="Baixar Excel detalhado"
-                      disabled={isExportingExcel}
-                    >
-                      <FileSpreadsheet className="h-2.5 w-2.5" />
-                    </button>
-                    <button
-                      className={`${actionButtonClass} hover:border-amber-500/50 hover:text-amber-200`}
-                      onClick={() => onEmail && onEmail(quote)}
-                      title="Gerar e-mail"
-                    >
-                      <Mail className="h-2.5 w-2.5" />
-                    </button>
-                    <button
-                      className={`${actionButtonClass} hover:border-amber-300/50 hover:text-amber-100`}
-                      onClick={() => onProfitability && onProfitability(quote)}
-                      title="Rentabilidade"
-                    >
-                      <BadgePercent className="h-2.5 w-2.5" />
-                    </button>
-                    <button
-                      className={`${actionButtonClass} hover:border-rose-500/50 hover:text-rose-200`}
-                      onClick={() => onDelete(quote)}
-                      title="Excluir"
-                    >
-                      <Trash2 className="h-2.5 w-2.5" />
-                    </button>
-                  </div>
+                  <button type="button" className="quote-actions-trigger" onClick={() => setActionQuote(quote)} title="Abrir ações" aria-label={`Abrir ações do orçamento ${quote.poNumber || ''}`}>
+                    <MoreHorizontal className="h-4 w-4" />
+                  </button>
                 </td>
               </tr>
               );
@@ -364,6 +325,25 @@ const QuotesTable = ({
         </table>
       </div>
     </div>
+    {actionQuote ? (
+      <ModalPortal>
+        <div className="cyber-overlay fixed inset-0 z-50 flex items-center justify-center px-4" onMouseDown={(event) => event.target === event.currentTarget && setActionQuote(null)}>
+          <div className="cyber-dialog quote-actions-dialog w-full max-w-sm p-4" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="quote-actions-heading"><div><span>Orçamento</span><strong>PO {actionQuote.poNumber || '--'}</strong></div><button type="button" onClick={() => setActionQuote(null)} aria-label="Fechar"><X className="h-4 w-4" /></button></div>
+            <div className="quote-actions-list">
+              <button type="button" onClick={() => runAction(onEdit)}><Pencil /><span>Editar orçamento</span></button>
+              <button type="button" onClick={() => runAction(onDuplicate)}><Copy /><span>Duplicar</span></button>
+              <button type="button" onClick={() => runAction(handleExportPdf)}><FileDown /><span>Exportar PDF</span></button>
+              <button type="button" onClick={() => runAction(handleExportExcel)}><FileSpreadsheet /><span>Exportar Excel</span></button>
+              <button type="button" onClick={() => runAction(onEmail)}><Mail /><span>Criar e-mail</span></button>
+              <button type="button" onClick={() => runAction(onProfitability)}><BadgePercent /><span>Analisar rentabilidade</span></button>
+              <button type="button" className="is-danger" onClick={() => runAction(onDelete)}><Trash2 /><span>Excluir orçamento</span></button>
+            </div>
+          </div>
+        </div>
+      </ModalPortal>
+    ) : null}
+    </>
   );
 };
 

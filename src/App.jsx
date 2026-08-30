@@ -2,16 +2,13 @@ import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { useMsal } from '@azure/msal-react';
 import { Loader2, LogIn, LogOut, ShieldCheck } from 'lucide-react';
-import Sidebar from './components/Sidebar.jsx';
-import Header from './components/Header.jsx';
-import MobileSidebar from './components/MobileSidebar.jsx';
 import ShowcaseHeader from './components/ShowcaseHeader.jsx';
 import ShowcaseMobileSidebar from './components/ShowcaseMobileSidebar.jsx';
 import ShowcaseThemeLayer from './components/ShowcaseThemeLayer.jsx';
+import ProfessionalShell from './components/ProfessionalShell.jsx';
 import ScrollToTopButton from './components/ScrollToTopButton.jsx';
-import CyberModeLayer from './components/CyberModeLayer.jsx';
 import { ToastProvider } from './components/ToastHost.jsx';
-import ModalPortal from './components/ModalPortal.jsx';
+import OverflowTooltip from './components/OverflowTooltip.jsx';
 import { getActiveAccount, hasMsalConfig, loginRequest } from './auth.js';
 import { setCurrentUser } from './utils/userSession.js';
 
@@ -38,7 +35,7 @@ const AuthScreen = ({
   const appTitle = import.meta.env.VITE_APP_TITLE || 'CRM Orçamentos';
 
   return (
-    <div className="auth-screen relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-8 text-white">
+    <div className="auth-screen auth-screen-professional relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-8 text-white">
       <div className="auth-screen-bg" />
       <div className="auth-screen-orb auth-screen-orb-a" />
       <div className="auth-screen-orb auth-screen-orb-b" />
@@ -143,7 +140,6 @@ const ProtectedRoute = ({ isAuthenticated, onLogin, children }) => {
 };
 
 function App() {
-  const legacyThemePassword = '102030';
   const { instance, accounts, inProgress } = useMsal();
   const location = useLocation();
   const navigate = useNavigate();
@@ -154,21 +150,16 @@ function App() {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [signedOut, setSignedOut] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [cyberModeEnabled, setCyberModeEnabled] = useState(() => localStorage.getItem('crm-cyber-mode') === '1');
-  const [legacyThemeEnabled, setLegacyThemeEnabled] = useState(() => localStorage.getItem('crm-legacy-theme') === '1');
+  const [interfaceMode, setInterfaceMode] = useState(() => localStorage.getItem('crm-interface-mode') || 'professional');
   const [showcaseEntryActive, setShowcaseEntryActive] = useState(false);
-  const [legacyThemePromptOpen, setLegacyThemePromptOpen] = useState(false);
-  const [legacyThemePasswordValue, setLegacyThemePasswordValue] = useState('');
-  const [legacyThemePasswordError, setLegacyThemePasswordError] = useState('');
   const showcaseWasActiveRef = useRef(false);
-  const showcasePasswordInputRef = useRef(null);
   const showcaseStageRef = useRef(null);
   const showcaseLastPathRef = useRef(null);
   const showcaseScrollOnRouteChangeRef = useRef(false);
 
   const isAuthenticated = useMemo(() => !!account, [account]);
-  const shouldApplyCyberMode = cyberModeEnabled && isAuthenticated && !signedOut && !isLoggingOut && !error;
-  const showcaseActive = isAuthenticated && !signedOut && !isLoggingOut && !error && !legacyThemeEnabled;
+  const showcaseActive = isAuthenticated && !signedOut && !isLoggingOut && !error && interfaceMode === 'previous';
+  const professionalActive = isAuthenticated && !signedOut && !isLoggingOut && !error && interfaceMode === 'professional';
 
   const applyAuthenticatedUser = (active) => {
     if (!active) {
@@ -232,20 +223,23 @@ function App() {
   }, [location.pathname]);
 
   useEffect(() => {
-    document.body.classList.toggle('cyber-mode', shouldApplyCyberMode);
-    document.body.classList.toggle('cyber-mode-enabled', shouldApplyCyberMode);
     document.body.classList.toggle('showcase-theme-enabled', showcaseActive);
     document.body.classList.toggle('showcase-theme-entering', showcaseActive && showcaseEntryActive);
-    localStorage.setItem('crm-cyber-mode', cyberModeEnabled ? '1' : '0');
-    localStorage.setItem('crm-legacy-theme', legacyThemeEnabled ? '1' : '0');
+    document.body.classList.toggle('professional-theme', professionalActive);
+    localStorage.removeItem('crm-cyber-mode');
+    localStorage.removeItem('crm-legacy-theme');
     localStorage.removeItem('crm-gold-showcase');
     return () => {
-      document.body.classList.remove('cyber-mode');
-      document.body.classList.remove('cyber-mode-enabled');
       document.body.classList.remove('showcase-theme-enabled');
       document.body.classList.remove('showcase-theme-entering');
+      document.body.classList.remove('professional-theme');
     };
-  }, [cyberModeEnabled, legacyThemeEnabled, shouldApplyCyberMode, showcaseActive, showcaseEntryActive]);
+  }, [professionalActive, showcaseActive, showcaseEntryActive]);
+
+  useEffect(() => {
+    localStorage.setItem('crm-interface-mode', interfaceMode);
+    setMobileOpen(false);
+  }, [interfaceMode]);
 
   useEffect(() => {
     const wasActive = showcaseWasActiveRef.current;
@@ -289,31 +283,6 @@ function App() {
   }, [location.pathname, showcaseActive]);
 
   useEffect(() => {
-    if (!legacyThemePromptOpen) {
-      return undefined;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      showcasePasswordInputRef.current?.focus();
-      showcasePasswordInputRef.current?.select?.();
-    }, 20);
-
-    const handleKeydown = (event) => {
-      if (event.key === 'Escape') {
-        setLegacyThemePromptOpen(false);
-        setLegacyThemePasswordValue('');
-        setLegacyThemePasswordError('');
-      }
-    };
-
-    window.addEventListener('keydown', handleKeydown);
-    return () => {
-      window.clearTimeout(timeoutId);
-      window.removeEventListener('keydown', handleKeydown);
-    };
-  }, [legacyThemePromptOpen]);
-
-  useEffect(() => {
     const handleKeydown = (event) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       const active = document.activeElement;
@@ -338,12 +307,6 @@ function App() {
         event.preventDefault();
         navigate('/orcamentos?new=1');
         return;
-      }
-      if (showcaseActive && event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'l') {
-        event.preventDefault();
-        setLegacyThemePasswordValue('');
-        setLegacyThemePasswordError('');
-        setLegacyThemePromptOpen(true);
       }
     };
 
@@ -386,35 +349,6 @@ function App() {
       setSignedOut(true);
       setIsLoggingOut(false);
     }
-  };
-
-  const closeLegacyThemePrompt = () => {
-    setLegacyThemePromptOpen(false);
-    setLegacyThemePasswordValue('');
-    setLegacyThemePasswordError('');
-  };
-
-  const handleRequestLegacyTheme = () => {
-    setLegacyThemePasswordValue('');
-    setLegacyThemePasswordError('');
-    setLegacyThemePromptOpen(true);
-  };
-
-  const handleLegacyThemePasswordSubmit = (event) => {
-    event.preventDefault();
-
-    if (legacyThemePasswordValue.trim() !== legacyThemePassword) {
-      setLegacyThemePasswordError('Senha incorreta.');
-      return;
-    }
-
-    setLegacyThemeEnabled(true);
-    closeLegacyThemePrompt();
-  };
-
-  const handleReturnToDefaultTheme = () => {
-    setLegacyThemeEnabled(false);
-    setMobileOpen(false);
   };
 
   const requestShowcaseStageScroll = () => {
@@ -496,132 +430,57 @@ function App() {
 
   return (
     <ToastProvider>
+      <OverflowTooltip />
       <div
-        className={`app-shell ${shouldApplyCyberMode ? 'cyber-mode-enabled' : ''} ${showcaseActive ? 'showcase-theme-enabled' : ''} ${
+        className={`app-shell ${showcaseActive ? 'showcase-theme-enabled' : ''} ${
           showcaseEntryActive ? 'showcase-theme-entering' : ''
+        } ${professionalActive ? 'professional-theme' : ''
         }`}
       >
-        {shouldApplyCyberMode ? <CyberModeLayer showcaseEnabled={false} /> : null}
         {showcaseActive ? <ShowcaseThemeLayer /> : null}
         {showcaseEntryActive ? <div className="showcase-theme-flash" aria-hidden="true" /> : null}
-        {showcaseActive ? (
-          <div className="app-content showcase-shell text-white">
-            <div className="showcase-main-column">
-              <ShowcaseHeader
-                appTitle={appTitle}
-                currentPath={location.pathname}
-                user={user}
-                onMenuClick={() => setMobileOpen(true)}
-                onCreateQuote={() => navigate('/orcamentos?new=1')}
-                onCreateClient={() => navigate('/clientes?new=1')}
-                onOpenReports={() => navigate('/relatorios')}
-                onSelectSubsection={requestShowcaseStageScroll}
-                onRequestLegacyTheme={handleRequestLegacyTheme}
-              />
-              <main ref={showcaseStageRef} className="showcase-stage-scroll">
-                <div className="showcase-stage-shell">
-                  <div className="showcase-stage-content">{appRoutes}</div>
-                </div>
-              </main>
-              <ScrollToTopButton />
-            </div>
-              <ShowcaseMobileSidebar
-              open={mobileOpen}
-              onClose={() => setMobileOpen(false)}
-              currentPath={location.pathname}
+        {showcaseActive ? <div className="app-content showcase-shell text-white">
+          <div className="showcase-main-column">
+            <ShowcaseHeader
               appTitle={appTitle}
-              user={user}
-              onLogout={handleLogout}
+              currentPath={location.pathname}
+              onMenuClick={() => setMobileOpen(true)}
+              onCreateQuote={() => navigate('/orcamentos?new=1')}
+              onCreateClient={() => navigate('/clientes?new=1')}
+              onOpenReports={() => navigate('/relatorios')}
               onSelectSubsection={requestShowcaseStageScroll}
+              onUseNewInterface={() => setInterfaceMode('professional')}
             />
+            <main ref={showcaseStageRef} className="showcase-stage-scroll">
+              <div className="showcase-stage-shell">
+                <div className="showcase-stage-content">{appRoutes}</div>
+              </div>
+            </main>
+            <ScrollToTopButton />
           </div>
-        ) : (
-          <div className="app-content flex h-screen overflow-hidden bg-background text-white">
-            <Sidebar currentPath={location.pathname} appTitle={appTitle} />
-            <div className="flex min-h-0 flex-1 flex-col">
-              <Header
-                user={user}
-                onLogout={handleLogout}
-                onMenuClick={() => setMobileOpen(true)}
-                cyberModeEnabled={cyberModeEnabled}
-                legacyThemeEnabled={legacyThemeEnabled}
-                onToggleCyberMode={() => setCyberModeEnabled((prev) => !prev)}
-                onReturnToDefaultTheme={handleReturnToDefaultTheme}
-              />
-              <main className="scroll-container desktop-shell min-h-0 flex-1 overflow-y-auto px-3 pb-3 pt-2 sm:px-4 sm:pb-4 sm:pt-3 md:px-6 md:pb-6 md:pt-4 lg:px-8 lg:pb-8 lg:pt-4">
-                {appRoutes}
-              </main>
-              <ScrollToTopButton />
-            </div>
-            <MobileSidebar
-              open={mobileOpen}
-              onClose={() => setMobileOpen(false)}
-              currentPath={location.pathname}
-              appTitle={appTitle}
-              user={user}
-              onReturnToDefaultTheme={handleReturnToDefaultTheme}
-            />
-          </div>
+          <ShowcaseMobileSidebar
+            open={mobileOpen}
+            onClose={() => setMobileOpen(false)}
+            currentPath={location.pathname}
+            appTitle={appTitle}
+            user={user}
+            onLogout={handleLogout}
+            onSelectSubsection={requestShowcaseStageScroll}
+          />
+        </div> : (
+          <ProfessionalShell
+            currentPath={location.pathname}
+            user={user}
+            mobileOpen={mobileOpen}
+            onMobileOpen={() => setMobileOpen(true)}
+            onMobileClose={() => setMobileOpen(false)}
+            onLogout={handleLogout}
+            onCreateQuote={() => navigate('/orcamentos?new=1')}
+            onUsePreviousInterface={() => setInterfaceMode('previous')}
+          >
+            {appRoutes}
+          </ProfessionalShell>
         )}
-        {legacyThemePromptOpen ? (
-          <ModalPortal>
-            <div className="cyber-overlay fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/78 px-4 backdrop-blur-sm">
-            <button
-              type="button"
-              className="absolute inset-0"
-              onClick={closeLegacyThemePrompt}
-              aria-label="Fechar solicitacao de senha"
-            />
-            <form
-              className="cyber-dialog relative z-[1] w-full max-w-md rounded-2xl border border-white/10 bg-slate-950/95 p-5 text-white shadow-2xl sm:p-6"
-              onSubmit={handleLegacyThemePasswordSubmit}
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-[11px] uppercase tracking-[0.28em] text-slate-400">Tema legado</p>
-                  <h2 className="mt-2 text-xl font-semibold text-white">Digite a senha para abrir o tema antigo</h2>
-                  <p className="mt-2 text-sm leading-6 text-slate-300">
-                    O preto e dourado agora e o tema padrao. Essa senha libera apenas o layout antigo para manutencao eventual.
-                  </p>
-                </div>
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-slate-100">
-                  <ShieldCheck className="h-5 w-5" />
-                </div>
-              </div>
-
-              <label className="mt-5 block text-[11px] uppercase tracking-[0.24em] text-slate-400" htmlFor="showcase-password-input">
-                Senha
-              </label>
-              <input
-                id="showcase-password-input"
-                ref={showcasePasswordInputRef}
-                type="password"
-                value={legacyThemePasswordValue}
-                onChange={(event) => {
-                  setLegacyThemePasswordValue(event.target.value);
-                  if (legacyThemePasswordError) {
-                    setLegacyThemePasswordError('');
-                  }
-                }}
-                className="mt-2 w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition focus:border-primary/50 focus:bg-white/[0.07]"
-                placeholder="Informe a senha"
-                autoComplete="current-password"
-              />
-
-              {legacyThemePasswordError ? <p className="mt-2 text-sm text-rose-300">{legacyThemePasswordError}</p> : null}
-
-              <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-                <button type="button" className="btn-secondary justify-center" onClick={closeLegacyThemePrompt}>
-                  Cancelar
-                </button>
-                <button type="submit" className="btn-primary justify-center">
-                  Abrir tema antigo
-                </button>
-              </div>
-            </form>
-            </div>
-          </ModalPortal>
-        ) : null}
       </div>
     </ToastProvider>
   );

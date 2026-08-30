@@ -445,6 +445,7 @@ export const updateQuoteApprovalStatus = async (poNumber, approvalStatus) => {
     const { headerIndex, headers, dataRows } = findHeaderRow(rows);
     const poIdx = headerIndexByName(headers, "po");
     const approvalIdx = headerIndexByName(headers, "aprovacao");
+    const statusIdx = headerIndexByName(headers, "status");
     const invoiceTriggerIdx = resolveInvoiceTriggerColumnIndex(headers);
     if (poIdx === -1 || approvalIdx === -1) return;
 
@@ -470,9 +471,11 @@ export const updateQuoteApprovalStatus = async (poNumber, approvalStatus) => {
     const canUseFallback = Boolean(siteId);
     const normalizedApproval = normalizeKey(approvalStatus);
     const invoiceTriggerValue = normalizedApproval === "aprovado" ? "Criar NF" : "";
+    const synchronizedStatus = normalizedApproval.includes("aguard") ? "Enviado" : approvalStatus;
 
     const updates = [
       { columnIndex: approvalIdx, value: approvalStatus || "" },
+      { columnIndex: statusIdx, value: synchronizedStatus || "" },
       { columnIndex: invoiceTriggerIdx, value: invoiceTriggerValue },
     ].filter((entry, index, array) => entry.columnIndex >= 0 && array.findIndex((item) => item.columnIndex === entry.columnIndex) === index);
 
@@ -512,6 +515,72 @@ export const updateQuoteApprovalStatus = async (poNumber, approvalStatus) => {
     }
   } catch (error) {
     console.warn("Falha ao atualizar aprovacao na planilha", error);
+  }
+};
+
+export const updateQuoteConditionStatus = async (poNumber, conditionStatus, syncStatus = true) => {
+  if (!hasQuoteSheetConfig) {
+    console.warn("[quoteSheet] Config ausente, nao atualizando condicao na planilha.");
+    return;
+  }
+  if (!poNumber) return;
+  try {
+    const { rows, sheet } = await fetchSheetRows();
+    if (!rows.length) return;
+    const { headerIndex, headers, dataRows } = findHeaderRow(rows);
+    const poIdx = headerIndexByName(headers, "po");
+    // A coluna e localizada pelo cabecalho; I e usada como seguranca para a planilha atual.
+    const detectedConditionIdx = headerIndexByName(headers, "condicao");
+    const conditionIdx = detectedConditionIdx >= 0 ? detectedConditionIdx : 8;
+    const statusIdx = headerIndexByName(headers, "status");
+    if (poIdx === -1) return;
+
+    const rowIndex = dataRows.findIndex((row) => {
+      const value = row[poIdx];
+      if (value === undefined || value === null) return false;
+      const text = value.toString().trim();
+      if (!text) return false;
+      const valueNumber = parseNumber(text);
+      const targetNumber = parseNumber(poNumber);
+      return valueNumber && targetNumber ? valueNumber === targetNumber : text === poNumber.toString();
+    });
+    if (rowIndex === -1) {
+      console.warn("[quoteSheet] PO nao encontrada para atualizar condicao", { poNumber });
+      return;
+    }
+
+    const targetRow = headerIndex + 2 + rowIndex;
+    const encodedSheet = encodeURIComponent(sheet || sheetName);
+    const token = await acquireToken();
+    const updates = [
+      { columnIndex: conditionIdx, value: conditionStatus || "" },
+      ...(syncStatus ? [{ columnIndex: statusIdx, value: conditionStatus || "" }] : []),
+    ].filter((entry) => entry.columnIndex >= 0);
+    const patchCell = async (columnIndex, value, useFallback = false) => {
+      const columnLetter = columnIndexToLetter(columnIndex);
+      const url = useFallback
+        ? `${graphBase}/sites/${siteId}/drives/${driveId}/items/${itemId}/workbook/worksheets/${encodedSheet}/range(address='${columnLetter}${targetRow}')`
+        : `${graphBase}/drives/${driveId}/items/${itemId}/workbook/worksheets/${encodedSheet}/range(address='${columnLetter}${targetRow}')`;
+      await axios.patch(url, { values: [[value]] }, {
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      });
+    };
+
+    try {
+      for (const update of updates) {
+        // eslint-disable-next-line no-await-in-loop
+        await patchCell(update.columnIndex, update.value);
+      }
+    } catch (error) {
+      if (!siteId) throw error;
+      for (const update of updates) {
+        // eslint-disable-next-line no-await-in-loop
+        await patchCell(update.columnIndex, update.value, true);
+      }
+    }
+  } catch (error) {
+    console.warn("Falha ao atualizar condicao na planilha", error);
+    throw error;
   }
 };
 

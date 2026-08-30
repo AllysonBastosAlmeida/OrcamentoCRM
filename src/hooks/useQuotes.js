@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { createQuote, deleteQuote, duplicateQuote, getQuotes, updateQuote, updateQuoteApproval } from '../services/quotes.js';
+import { createQuote, deleteQuote, duplicateQuote, getQuotes, updateQuote, updateQuoteApproval, updateQuoteCondition } from '../services/quotes.js';
 import { fetchQuoteHistory, hasQuoteSheetConfig } from '../services/quoteSheet.js';
 
 const toNumber = (val) => {
@@ -28,6 +28,19 @@ const toNumber = (val) => {
   return Number.isNaN(num) ? 0 : num;
 };
 
+const normalizeLegacyWaitingStatus = (value) => {
+  const normalized = value?.toString().normalize('NFD').replace(/\p{Diacritic}/gu, '').trim().toLowerCase();
+  return normalized?.includes('aguard') ? 'Enviado' : value;
+};
+
+const resolveSynchronizedStatus = (status, approvalStatus, condition) => {
+  const normalizedCondition = condition?.toString().normalize('NFD').replace(/\p{Diacritic}/gu, '').trim().toLowerCase();
+  if (normalizedCondition?.includes('conclu')) return 'Concluído';
+  const normalizedApproval = approvalStatus?.toString().normalize('NFD').replace(/\p{Diacritic}/gu, '').trim().toLowerCase();
+  if (normalizedApproval?.includes('aguard')) return 'Enviado';
+  return normalizeLegacyWaitingStatus(status);
+};
+
 export const useQuotes = () => {
   const [quotes, setQuotes] = useState([]);
   const [syncInfo, setSyncInfo] = useState({ status: 'idle', lastSync: null, error: null });
@@ -45,8 +58,13 @@ export const useQuotes = () => {
     return {
       ...merged,
       poNumber: local?.poNumber || remote?.poNumber,
-      status: remote?.status || local?.status,
+      status: resolveSynchronizedStatus(
+        remote?.status || local?.status,
+        remote?.approvalStatus || local?.approvalStatus,
+        remote?.condition || local?.condition,
+      ),
       approvalStatus: remote?.approvalStatus || local?.approvalStatus,
+      condition: remote?.condition || local?.condition,
       category: remote?.category || local?.category,
       responsible: remote?.responsible || local?.responsible,
       total: remote?.total ?? local?.total,
@@ -79,7 +97,11 @@ export const useQuotes = () => {
   };
 
   const loadQuotes = async () => {
-    const local = (getQuotes() || []).map((q) => ({ ...q, source: q?.source || 'local' }));
+    const local = (getQuotes() || []).map((q) => ({
+      ...q,
+      status: resolveSynchronizedStatus(q?.status, q?.approvalStatus, q?.condition),
+      source: q?.source || 'local',
+    }));
     let merged = local;
     if (hasQuoteSheetConfig) {
       setSyncInfo((prev) => ({ ...prev, status: 'loading', error: null }));
@@ -94,6 +116,8 @@ export const useQuotes = () => {
           const details = h.details || {};
           const sheetApproval = h.approval || '';
           const totalNumber = toNumber(details.total ?? details.totalNumber ?? details.subtotal ?? h.totalNumber ?? h.total);
+          const approvalStatus = sheetApproval || details.approvalStatus || '';
+          const condition = h.condition || details.condition || '';
           return {
             id: details.id || `po-${h.poNumber || idx}-${h.clientName || ''}`,
             poNumber: details.poNumber || h.poNumber,
@@ -106,7 +130,7 @@ export const useQuotes = () => {
             contactPhone: details.contactPhone || '',
             contactEmail: details.contactEmail || '',
             title: details.title || h.title || '',
-            status: details.status || h.status || h.condition || 'Enviado',
+            status: resolveSynchronizedStatus(details.status || h.status || 'Enviado', approvalStatus, condition),
             createdAt: details.createdAt || h.date || '',
             validUntil: details.validUntil || h.date || '',
             createdBy: details.createdBy || '',
@@ -119,7 +143,8 @@ export const useQuotes = () => {
             totalNumber: details.total ?? details.totalNumber ?? totalNumber,
             items: Array.isArray(details.items) ? details.items : [],
             notes: details.notes || h.notes || '',
-            approvalStatus: sheetApproval || details.approvalStatus || '',
+            approvalStatus,
+            condition,
             category: details.category || h.category || '',
             responsible: details.responsible || h.responsible || '',
             deliveryTime: details.deliveryTime || '',
@@ -175,6 +200,12 @@ export const useQuotes = () => {
     return updated;
   };
 
+  const editCondition = async (quoteOrId, condition) => {
+    const updated = await updateQuoteCondition(quoteOrId, condition);
+    setQuotes(getQuotes());
+    return updated;
+  };
+
   const cloneQuote = (id) => {
     const clone = duplicateQuote(id);
     setQuotes(getQuotes());
@@ -195,5 +226,5 @@ export const useQuotes = () => {
     await loadQuotes();
   };
 
-  return { quotes, syncInfo, addQuote, editQuote, editApproval, cloneQuote, removeQuote, refreshQuotes: loadQuotes };
+  return { quotes, syncInfo, addQuote, editQuote, editApproval, editCondition, cloneQuote, removeQuote, refreshQuotes: loadQuotes };
 };

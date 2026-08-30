@@ -4,7 +4,13 @@ import ExportButtons from '../components/ExportButtons.jsx';
 import { useQuotes } from '../hooks/useQuotes.js';
 import { formatCurrency } from '../utils/formatters.js';
 
-const COLORS = ['#d2a84f', '#f0cb79', '#a77a2f', '#f4dfab', '#7f5b1d'];
+const COLORS = [
+  'var(--chart-1, #d2a84f)',
+  'var(--chart-2, #f0cb79)',
+  'var(--chart-3, #a77a2f)',
+  'var(--chart-4, #f4dfab)',
+  'var(--chart-5, #7f5b1d)',
+];
 const loadExporters = () => import('../utils/exporters.js');
 
 const Relatorios = () => {
@@ -82,7 +88,12 @@ const Relatorios = () => {
                   ))}
                 </Pie>
                 <Tooltip
-                  contentStyle={{ background: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', color: '#fff' }}
+                  contentStyle={{
+                    background: 'var(--chart-tooltip-bg, #0f172a)',
+                    border: '1px solid var(--chart-tooltip-border, rgba(255,255,255,0.1))',
+                    color: 'var(--chart-tooltip-text, #fff)',
+                    borderRadius: '12px',
+                  }}
                 />
                 <Legend />
               </PieChart>

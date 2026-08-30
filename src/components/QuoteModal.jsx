@@ -89,12 +89,12 @@ const CATEGORY_OPTIONS = [
 
 const CATEGORY_SCOPE_STORAGE_KEY = 'crm-orcamentos:category-scope-templates';
 const DEFAULT_CATEGORY_SCOPES = {
-  'Cabeamento Estruturado': 'Execucao de infraestrutura de cabeamento estruturado, observando as boas praticas de instalacao, organizacao e identificacao dos pontos.',
-  'Ciber Seguranca': 'Implantacao e configuracao da solucao de ciberseguranca definida para o ambiente, com validacao dos controles aplicados.',
-  'Infraestrutura Fibra Optica': 'Execucao da infraestrutura de conectividade em fibra optica, incluindo acomodacao, identificacao e validacao dos enlaces.',
-  'Sistema Audiovisuais': 'Implantacao e configuracao do sistema audiovisual, incluindo interligacao e validacao funcional dos equipamentos.',
-  'Sistema - CFTV': 'Implantacao e configuracao do sistema de CFTV e monitoramento, com posicionamento e validacao dos recursos previstos.',
-  Telecom: 'Execucao e organizacao da infraestrutura de telecomunicacoes, com identificacao e validacao dos recursos instalados.',
+  'Cabeamento Estruturado': 'Execução de infraestrutura de cabeamento estruturado, em conformidade com as boas práticas de instalação, organização e identificação dos pontos.',
+  'Ciber Seguranca': 'Implantação e configuração da solução de cibersegurança definida para o ambiente, com validação dos controles aplicados.',
+  'Infraestrutura Fibra Optica': 'Execução da infraestrutura de conectividade em fibra óptica, contemplando organização, identificação e validação dos enlaces.',
+  'Sistema Audiovisuais': 'Implantação e configuração do sistema audiovisual, incluindo interligação e validação funcional dos equipamentos.',
+  'Sistema - CFTV': 'Implantação e configuração do sistema de CFTV e monitoramento, com posicionamento e validação dos recursos previstos.',
+  Telecom: 'Execução e organização da infraestrutura de telecomunicações, com identificação e validação dos recursos instalados.',
 };
 
 const readCategoryScopeTemplates = () => {
@@ -123,8 +123,25 @@ const formatServiceQuantity = (item) => {
   const quantity = Number(item?.quantity || 0);
   const rawUnit = (item?.unit || '').toString().trim();
   const normalizedUnit = normalizeScopeText(rawUnit);
-  const unit = normalizedUnit === 'm' ? 'm' : normalizedUnit.startsWith('un') ? 'un.' : rawUnit.toLowerCase();
-  return quantity > 0 ? `${quantity}${unit ? ` ${unit}` : ''}` : '';
+  const unitLabels = {
+    m: ['metro', 'metros'],
+    metro: ['metro', 'metros'],
+    metros: ['metro', 'metros'],
+    un: ['unidade', 'unidades'],
+    'un.': ['unidade', 'unidades'],
+    unidade: ['unidade', 'unidades'],
+    unidades: ['unidade', 'unidades'],
+    dia: ['dia', 'dias'],
+    dias: ['dia', 'dias'],
+    hora: ['hora', 'horas'],
+    horas: ['hora', 'horas'],
+  };
+  const labels = unitLabels[normalizedUnit];
+  const unit = labels ? labels[quantity === 1 ? 0 : 1] : rawUnit.toLowerCase();
+  const formattedQuantity = Number.isInteger(quantity)
+    ? String(quantity)
+    : quantity.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+  return quantity > 0 ? `${formattedQuantity}${unit ? ` ${unit}` : ''}` : '';
 };
 
 const formatServiceLocation = (location) => {
@@ -149,60 +166,61 @@ const buildInstallationScope = (item) => {
   const place = formatServiceLocation(location);
 
   if (/kit.*fixacao|fixacao.*poste/.test(normalized)) {
-    return `Fixação de ${amount}kits em poste${place}, garantindo sustentação adequada, estabilidade mecânica e organização da infraestrutura instalada.`;
+    return [`Fixação de ${amount}kits em poste${place}, garantindo sustentação e estabilidade mecânica.`, 'Organização e acabamento da infraestrutura instalada.'];
   }
   if (/patch\s*cord/.test(normalized)) {
-    return `Instalação de ${amount}patch cords${place} para interligação dos equipamentos, com acomodação organizada e conferência da conectividade.`;
+    return [`Instalação de ${amount}patch cords${place} para interligação dos equipamentos.`, 'Acomodação organizada dos cordões e conferência da conectividade.'];
   }
   if (/conversor.*(midia|media)|media\s*converter/.test(normalized)) {
-    return `Integração de ${amount}conversores de mídia${place}, incluindo conexão aos enlaces ópticos e metálicos, energização e teste de comunicação.`;
+    return [`Integração de ${amount}conversores de mídia${place}, com conexão aos enlaces ópticos e metálicos.`, 'Energização e teste de comunicação dos conversores instalados.'];
   }
   if (/\bdio\b|distribuidor.*optico/.test(normalized)) {
-    return `Instalação de ${amount}distribuidores internos ópticos (DIO)${place}, com fixação, acomodação das fibras, identificação e preparação para as terminações.`;
+    return [`Instalação e fixação de ${amount}distribuidores internos ópticos (DIO)${place}.`, 'Acomodação e identificação das fibras, com preparação para as terminações ópticas.'];
   }
   if (/rack|bracket|gabinete/.test(normalized)) {
-    return `Montagem de ${amount}racks ou gabinetes de telecomunicações${place}, contemplando fixação, organização dos componentes e acomodação do cabeamento.`;
+    return [`Montagem e fixação de ${amount}racks ou gabinetes de telecomunicações${place}.`, 'Organização dos componentes e acomodação técnica do cabeamento.'];
   }
   if (/vbox|caixa.*cftv|caixa.*camera/.test(normalized)) {
-    return `Instalação de ${amount}caixas de proteção VBOX${place}, destinadas ao acondicionamento das conexões e fontes do sistema de CFTV, com fixação segura, organização interna e vedação adequada.`;
+    return [`Instalação e fixação de ${amount}caixas de proteção VBOX${place} para acondicionamento das conexões e fontes do sistema de CFTV.`, 'Organização interna e verificação da vedação das caixas instaladas.'];
   }
   if (/camera/.test(normalized)) {
-    return `Fixação de ${amount}câmeras de CFTV${place}, incluindo posicionamento, conexão, ajuste do campo de visão e validação da imagem.`;
+    return [`Fixação e conexão de ${amount}câmeras de CFTV${place}.`, 'Posicionamento, ajuste do campo de visão e validação da imagem.'];
   }
   if (/cftv/.test(normalized)) {
     const subject = cleanServiceSubject(service || 'componentes do sistema de CFTV');
-    return `Instalação de ${amount}${subject}${place}, com fixação, interligação ao sistema e testes funcionais de operação.`;
+    return [`Instalação e fixação de ${amount}${subject}${place}, com interligação ao sistema.`, 'Execução de testes funcionais para validação da operação.'];
   }
   if (/tomada|espelho|keystone|ponto.*rede/.test(normalized)) {
-    return `Montagem de ${amount}pontos de telecomunicações${place}, incluindo fixação dos componentes, terminação, identificação e teste de continuidade.`;
+    return [`Montagem e terminação de ${amount}pontos de telecomunicações${place}.`, 'Identificação dos pontos e execução de teste de continuidade.'];
   }
 
   const subject = cleanServiceSubject(service || 'equipamentos previstos');
-  return `Instalação de ${amount}${subject}${place}, contemplando fixação, interligação, organização e testes funcionais após a montagem.`;
+  return [`Instalação e fixação de ${amount}${subject}${place}, com a respectiva interligação.`, 'Organização da montagem e execução de testes funcionais.'];
 };
 
 const buildConfigurationScope = (item) => {
   const { service, location } = splitServiceName(item?.name || item?.description || '');
   const quantity = formatServiceQuantity(item);
   const subject = cleanServiceSubject(service || 'solução prevista');
-  return `Configuração de ${quantity ? `${quantity} de ` : ''}${subject}${formatServiceLocation(location)}, com parametrização, integração e validação operacional.`;
+  return [`Configuração de ${quantity ? `${quantity} de ` : ''}${subject}${formatServiceLocation(location)}, com parametrização e integração ao ambiente.`, 'Validação operacional das configurações aplicadas.'];
 };
 
 const buildComplementaryServiceScope = (item) => {
   const { service, location } = splitServiceName(item?.name || item?.description || '');
   const quantity = formatServiceQuantity(item);
   const subject = cleanServiceSubject(service || 'atividade técnica prevista');
-  return `Execução de ${quantity ? `${quantity} de ` : ''}${subject}${formatServiceLocation(location)}, seguindo as boas práticas técnicas e com verificação do resultado ao término da atividade.`;
+  return [`Execução de ${quantity ? `${quantity} de ` : ''}${subject}${formatServiceLocation(location)}, conforme as boas práticas técnicas.`, 'Verificação do resultado ao término da atividade.'];
 };
 
 const renderServiceScopeTemplate = (item) => {
   const template = (item?.scopeTemplate || '').toString().trim();
   if (!template) return '';
   const { service, location } = splitServiceName(item?.name || item?.description || '');
-  const quantity = Number(item?.quantity || 0);
-  const unit = (item?.unit || '').toString().trim();
+  const formattedQuantity = formatServiceQuantity(item);
+  const [quantity = '', ...unitParts] = formattedQuantity.split(' ');
+  const unit = unitParts.join(' ');
   return template
-    .replaceAll('{quantidade}', quantity > 0 ? String(quantity) : '')
+    .replaceAll('{quantidade}', quantity)
     .replaceAll('{unidade}', unit)
     .replaceAll('{local}', location)
     .replaceAll('{servico}', service)
@@ -238,30 +256,38 @@ const buildAutomaticScope = (category, items = [], categoryScopes = DEFAULT_CATE
     const place = formatServiceLocation(location);
 
     if (/lancamento|passagem/.test(normalized) && /cabo.*(rede|dados)|utp|ftp|cat\s*[5-8]/.test(normalized)) {
-      sections.push(`Lancamento de ${quantity || 'cabos'} de cabeamento de rede${place}, com acomodacao, identificacao das extremidades e preparacao dos enlaces.`);
+      sections.push(
+        `Lançamento de ${quantity || 'cabos'} de cabeamento de rede${place}, respeitando o trajeto definido e os critérios técnicos de instalação.`,
+        `Acomodação e organização do cabeamento de rede na infraestrutura disponível${place}.`,
+        `Identificação das extremidades e preparação dos enlaces para conexão e testes.`,
+      );
       return;
     }
     if (/lancamento|passagem/.test(normalized) && /fibra|optico|optica/.test(normalized)) {
-      sections.push(`Lancamento de ${quantity || 'cabo'} de cabo optico${place}, com acomodacao adequada, identificacao das extremidades e preservacao do raio de curvatura.`);
+      sections.push(
+        `Lançamento de ${quantity || 'cabo'} de cabo óptico${place}, respeitando o trajeto definido e o raio mínimo de curvatura.`,
+        'Acomodação técnica do cabo óptico e organização nas terminações previstas.',
+        'Identificação das extremidades para rastreabilidade do enlace óptico.',
+      );
       return;
     }
     if (/fusao|emenda/.test(normalized) && /fibra|optico|optica/.test(normalized)) {
-      sections.push(`Fusao de ${quantity || 'fibras opticas'}${place}, incluindo preparacao, acomodacao, identificacao e verificacao do enlace.`);
+      sections.push(`Preparação e fusão de ${quantity || 'fibras ópticas'}${place}.`, 'Acomodação e identificação das fibras nas terminações.', 'Verificação técnica dos enlaces ópticos executados.');
       return;
     }
     if (/certificacao|teste/.test(normalized) && /rede|cabo|ponto/.test(normalized)) {
-      sections.push(`Certificacao de ${quantity || 'pontos de rede'}${place}, com validacao dos enlaces e registro dos resultados.`);
+      sections.push(`Certificação de ${quantity || 'pontos de rede'}${place}, conforme os parâmetros técnicos aplicáveis.`, 'Validação dos enlaces e registro dos resultados obtidos.');
       return;
     }
     if (/instalacao|fixacao|montagem/.test(normalized)) {
-      installationItems.push(buildInstallationScope(item));
+      installationItems.push(...buildInstallationScope(item));
       return;
     }
     if (/configuracao|programacao|ativacao/.test(normalized)) {
-      configurationItems.push(buildConfigurationScope(item));
+      configurationItems.push(...buildConfigurationScope(item));
       return;
     }
-    otherItems.push(buildComplementaryServiceScope(item));
+    otherItems.push(...buildComplementaryServiceScope(item));
   });
 
   if (installationItems.length) {
@@ -273,7 +299,11 @@ const buildAutomaticScope = (category, items = [], categoryScopes = DEFAULT_CATE
   if (otherItems.length) {
     sections.push(...otherItems);
   }
-  return sections.join('\n\n');
+  const uniqueSections = sections.filter((section, index) => {
+    const normalized = normalizeScopeText(section).replace(/\s+/g, ' ').trim();
+    return normalized && sections.findIndex((candidate) => normalizeScopeText(candidate).replace(/\s+/g, ' ').trim() === normalized) === index;
+  });
+  return uniqueSections.join('\n\n');
 };
 
 const LABOR_OPTIONS = [

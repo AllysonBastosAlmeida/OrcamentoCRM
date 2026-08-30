@@ -22,15 +22,15 @@ const Charts = ({ trendData, statusData }) => {
           <AreaChart data={trendData}>
             <defs>
               <linearGradient id="colorPrimary" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#d2a84f" stopOpacity={0.72} />
-                <stop offset="95%" stopColor="#d2a84f" stopOpacity={0.06} />
+                <stop offset="5%" stopColor="var(--chart-1, #d2a84f)" stopOpacity={0.72} />
+                <stop offset="95%" stopColor="var(--chart-1, #d2a84f)" stopOpacity={0.06} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-            <XAxis dataKey="month" stroke="#94a3b8" />
-            <YAxis stroke="#94a3b8" />
-            <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid rgba(255,255,255,0.1)' }} />
-            <Area type="monotone" dataKey="total" stroke="#f0cb79" fill="url(#colorPrimary)" isAnimationActive={false} />
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid, rgba(255,255,255,0.06))" />
+            <XAxis dataKey="month" stroke="var(--chart-axis, #94a3b8)" />
+            <YAxis stroke="var(--chart-axis, #94a3b8)" />
+            <Tooltip contentStyle={{ background: 'var(--chart-tooltip-bg, #0f172a)', border: '1px solid var(--chart-tooltip-border, rgba(255,255,255,0.1))', color: 'var(--chart-tooltip-text, #fff)', borderRadius: '12px' }} />
+            <Area type="monotone" dataKey="total" stroke="var(--chart-2, #f0cb79)" fill="url(#colorPrimary)" isAnimationActive={false} />
           </AreaChart>
         </ResponsiveContainer>
       </div>
@@ -44,11 +44,11 @@ const Charts = ({ trendData, statusData }) => {
         </div>
         <ResponsiveContainer width="100%" height={220}>
           <BarChart data={statusData} barGap={4}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-            <XAxis dataKey="status" stroke="#94a3b8" />
-            <YAxis stroke="#94a3b8" />
-            <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid rgba(255,255,255,0.1)' }} />
-            <Bar dataKey="value" fill="#d2a84f" radius={[8, 8, 2, 2]} isAnimationActive={false} />
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid, rgba(255,255,255,0.06))" />
+            <XAxis dataKey="status" stroke="var(--chart-axis, #94a3b8)" />
+            <YAxis stroke="var(--chart-axis, #94a3b8)" />
+            <Tooltip contentStyle={{ background: 'var(--chart-tooltip-bg, #0f172a)', border: '1px solid var(--chart-tooltip-border, rgba(255,255,255,0.1))', color: 'var(--chart-tooltip-text, #fff)', borderRadius: '12px' }} />
+            <Bar dataKey="value" fill="var(--chart-1, #d2a84f)" radius={[8, 8, 2, 2]} isAnimationActive={false} />
           </BarChart>
         </ResponsiveContainer>
       </div>

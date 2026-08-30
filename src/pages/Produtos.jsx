@@ -246,16 +246,8 @@ const Produtos = () => {
   const modalSavingLabel = isEditing ? 'Salvando alteracoes' : 'Salvando item';
   return (
     <div className="space-y-3 sm:space-y-4">
-      <div className="dashboard-hero">
-        <div className="min-w-0">
-          <p className="text-xs uppercase tracking-wide text-slate-400 sm:text-sm">{'Cat\u00e1logo'}</p>
-          <h1 className="mt-1 text-[1.8rem] font-bold leading-none text-white sm:text-[1.95rem]">Produtos (SharePoint)</h1>
-          <p className="mt-1.5 max-w-2xl text-[13px] leading-5 text-slate-400">
-            Carregados via Microsoft Graph diretamente da planilha QQP e Orcamento.xlsx. Atualize a qualquer momento.
-          </p>
-        </div>
-        <div className="dashboard-hero-actions">
-          <div className="dashboard-action-row">
+      <div className="catalog-compact-toolbar">
+        <div className="dashboard-action-row">
             <div className="inline-flex h-8 items-center rounded-xl border border-white/10 bg-white/5 p-1 text-[11px] font-semibold text-white">
               <button
                 type="button"
@@ -280,7 +272,6 @@ const Produtos = () => {
               <Plus className="h-4 w-4" />
               Novo item
             </button>
-          </div>
         </div>
       </div>
 

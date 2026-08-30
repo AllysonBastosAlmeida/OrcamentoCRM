@@ -39,7 +39,8 @@ const toBase64 = async (blob) => {
 
 const toRecipients = (value) =>
   (Array.isArray(value) ? value : [value])
-    .map((entry) => (entry || '').toString().trim())
+    .flatMap((entry) => (entry || '').toString().split(/[;,]/))
+    .map((entry) => entry.trim())
     .filter(Boolean)
     .map((address) => ({
       emailAddress: {
