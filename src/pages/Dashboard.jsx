@@ -23,8 +23,10 @@ import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import { useQuotes } from '../hooks/useQuotes.js';
 import { formatCurrency } from '../utils/formatters.js';
+import { calculateQuoteProfitability } from '../utils/profitability.js';
 
 const DASHBOARD_LAYOUT_STORAGE_KEY = 'orcamentocrm.dashboard.layouts.v2';
+const LEGACY_APPROVED_MARGIN_RATE = 0.35;
 const ExportButtons = lazy(() => import('../components/ExportButtons.jsx'));
 const loadExporters = () => import('../utils/exporters.js');
 const DASHBOARD_BREAKPOINTS = { lg: 1440, md: 1100, sm: 768, xs: 520, xxs: 0 };
@@ -357,6 +359,29 @@ const Dashboard = () => {
   const approvedValue = approved.reduce((acc, q) => acc + q.totalNumber, 0);
   const aguardandoValue = aguardando.reduce((acc, q) => acc + q.totalNumber, 0);
   const reprovadoValue = reprovados.reduce((acc, q) => acc + q.totalNumber, 0);
+  const approvedProfitability = approved.reduce(
+    (summary, quote) => {
+      const analysis = calculateQuoteProfitability(quote);
+      if (analysis?.ready) {
+        summary.revenue += analysis.revenue;
+        summary.profit += analysis.estimatedProfit;
+        summary.calculated += 1;
+        return summary;
+      }
+      const legacyRevenue = Number(quote?.totalNumber ?? quote?.total ?? 0) || 0;
+      summary.revenue += legacyRevenue;
+      summary.profit += legacyRevenue * LEGACY_APPROVED_MARGIN_RATE;
+      summary.estimatedLegacy += 1;
+      return summary;
+    },
+    { revenue: 0, profit: 0, calculated: 0, estimatedLegacy: 0 },
+  );
+  const approvedMarginPct = approvedProfitability.revenue > 0
+    ? (approvedProfitability.profit / approvedProfitability.revenue) * 100
+    : null;
+  const approvedMarginLabel = approvedMarginPct === null
+    ? '--'
+    : `${approvedMarginPct.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
 
   const monthComparison = useMemo(() => {
     const map = new Map();
@@ -433,6 +458,10 @@ const Dashboard = () => {
       description: 'Orcamentos com aprovacao marcada como aprovado.',
       icon: <CheckCircle2 className="h-5 w-5" />,
       quotes: approved,
+      highlights: [
+        { label: 'Lucro estimado', value: formatCurrency(approvedProfitability.profit) },
+        { label: 'Margem de lucro', value: approvedMarginLabel },
+      ],
     },
     {
       id: 'reproved-count',
@@ -877,7 +906,7 @@ const Dashboard = () => {
     id: `card-${card.id}`,
     minW: 2,
     minH: 2,
-    content: renderMetricWidget(card),
+    content: renderMetricWidget(card, { showHighlights: card.id === 'approved-count' }),
   }));
 
   const gridWidgets = [
@@ -1406,7 +1435,7 @@ const Dashboard = () => {
             </div>
 
             <div className="dashboard-kpi-grid">
-              {renderMetricWidget(cardById['approved-count'], { className: 'dashboard-kpi-card dashboard-kpi-approved' })}
+              {renderMetricWidget(cardById['approved-count'], { className: 'dashboard-kpi-card dashboard-kpi-approved', showHighlights: true })}
               {renderMetricWidget(cardById['reproved-count'], { className: 'dashboard-kpi-card dashboard-kpi-reproved' })}
               {renderMetricWidget(cardById['waiting-count'], { className: 'dashboard-kpi-card dashboard-kpi-waiting' })}
             </div>
