@@ -160,12 +160,8 @@ export const createQuote = async (payload) => {
   });
 
   if (hasQuoteSheetConfig) {
-    try {
-      const poNumber = await appendQuoteRow(quote);
-      if (poNumber) quote.poNumber = poNumber;
-    } catch (error) {
-      console.warn('Falha ao salvar PO na planilha', error);
-    }
+    const poNumber = await appendQuoteRow(quote);
+    if (poNumber) quote.poNumber = poNumber;
   }
 
   const updated = [quote, ...getQuotes()];

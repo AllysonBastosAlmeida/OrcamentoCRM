@@ -1,4 +1,5 @@
-﻿import axios from "axios";
+import axios from "axios";
+import { appendToQuoteTable } from "./quoteTable.js";
 import { acquireToken } from "../auth.js";
 
 const siteId = import.meta.env.VITE_GRAPH_SITE_ID_ORCAMENTOS || import.meta.env.VITE_GRAPH_SITE_ID;
@@ -30,7 +31,7 @@ const parseNumber = (val) => {
   if (typeof val === "number") return val;
   if (!val) return 0;
   const str = val.toString();
-  const cleaned = str.replace(/[^0-9,.\-]/g, "");
+  const cleaned = str.replace(/[^0-9,.-]/g, "");
   if (!cleaned) return 0;
 
   if (cleaned.includes(".") && cleaned.includes(",")) {
@@ -308,54 +309,21 @@ export const appendQuoteRow = async (quote) => {
   try {
     const { rows, sheet } = await fetchSheetRows();
     if (!rows.length) throw new Error("Planilha vazia ou inacessivel");
-    const { headerIndex, headers, dataRows } = findHeaderRow(rows);
+    const { headers, dataRows } = findHeaderRow(rows);
 
     const poNumber = getNextPoNumber(headers, dataRows);
     const row = buildRow(quote, poNumber);
 
-    const lastFilledIndex = (() => {
-      for (let i = dataRows.length - 1; i >= 0; i -= 1) {
-        if (dataRows[i]?.some((cell) => cell !== undefined && cell !== null && cell !== "")) return i;
-      }
-      return -1;
-    })();
-    const targetRow = headerIndex + 2 + lastFilledIndex + 1;
-    const rangeAddress = `A${targetRow}:${columnEnd}${targetRow}`;
     const encodedSheet = encodeURIComponent(sheet || sheetName);
-    const urlPrimary = `${graphBase}/drives/${driveId}/items/${itemId}/workbook/worksheets/${encodedSheet}/range(address='${rangeAddress}')`;
-    const urlFallback =
-      siteId && `${graphBase}/sites/${siteId}/drives/${driveId}/items/${itemId}/workbook/worksheets/${encodedSheet}/range(address='${rangeAddress}')`;
+    const sheetUrl = `${graphBase}/drives/${driveId}/items/${itemId}/workbook/worksheets/${encodedSheet}`;
     const token = await acquireToken();
-
-    console.info("[quoteSheet] PATCH append row", { rangeAddress, targetRow, poNumber, row });
-
-    const doPatch = async (url) =>
-      axios.patch(
-        url,
-        { values: [row] },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        },
-      );
-
-    try {
-      await doPatch(urlPrimary);
-    } catch (err) {
-      if (urlFallback) {
-        console.warn("[quoteSheet] add via drive falhou, tentando siteId", { status: err?.response?.status, data: err?.response?.data });
-        await doPatch(urlFallback);
-      } else {
-        throw err;
-      }
-    }
-
+    await appendToQuoteTable(axios, sheetUrl, {
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    }, row);
     return poNumber;
   } catch (error) {
     console.warn("Falha ao gravar orcamento na planilha", error);
-    return null;
+    throw error;
   }
 };
 
