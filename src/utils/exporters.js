@@ -608,8 +608,8 @@ export const exportQuoteToPDF = async (quote, options = {}) => {
   lineYData = bodyBoxY + 16;
   [
     ['Banco:', '077 - Inter'],
-    ['Agência:', '39885873'],
-    ['Conta:', '0001'],
+    ['Agência:', '0001'],
+    ['Conta:', '39885837-3'],
     ['Site:', 'www.cleverconnection.com.br'],
   ].forEach(([label, value]) => {
     doc.setTextColor(...palette.muted);
