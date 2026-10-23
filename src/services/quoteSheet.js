@@ -101,6 +101,7 @@ const sanitizeQuoteDetails = (quote) => ({
   status: quote?.status || "",
   validUntil: quote?.validUntil || "",
   deliveryTime: quote?.deliveryTime || "",
+  teamExecutionDays: quote?.teamExecutionDays ?? "",
   paymentTerms: quote?.paymentTerms || "",
   category: quote?.category || "",
   discountValue: quote?.discountValue ?? 0,
@@ -891,6 +892,12 @@ export const fetchQuoteHistory = async () => {
         responsible: safe(respIdx),
         notes: safe(obsIdx),
         details,
+        financialMetadata: {
+          invoiceNumber: safe(headerIndexByName(headers, "nf")),
+          paymentStatus: safe(headerIndexByName(headers, "situacao")),
+          paymentDateRaw: safe(headerIndexByName(headers, "data_pagamento")),
+          creationDateRaw: safe(headerIndexByName(headers, "data_criacao")),
+        },
       };
     };
 

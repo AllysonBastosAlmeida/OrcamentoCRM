@@ -110,6 +110,18 @@ export const calculateQuoteProfitability = (quote) => {
       return;
     }
 
+    if (itemId === 'diaria-gestao') {
+      const realCost = explicitCost ?? itemTotal;
+      serviceCost += realCost;
+      coveredServiceRevenue += itemTotal;
+      serviceDetails.push({
+        id: itemId, name: getDisplayName(item), quantity: toNumber(item.quantity),
+        billed: itemTotal, realCost, difference: roundCurrency(itemTotal - realCost),
+        note: 'Custo de gestao por dia informado na janela de diarias',
+      });
+      return;
+    }
+
     const modeledCost = SERVICE_COST_BY_ID.get(itemId);
     if (modeledCost) {
       const realCost = roundCurrency(modeledCost * toNumber(item?.quantity));

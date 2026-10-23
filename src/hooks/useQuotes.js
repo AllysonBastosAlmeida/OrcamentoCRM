@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useClients } from './useClients.js';
+import { resolveQuoteClients } from '../utils/quoteClients.js';
+import { useEffect, useMemo, useState } from 'react';
 import { createQuote, deleteQuote, duplicateQuote, getQuotes, updateQuote, updateQuoteApproval, updateQuoteCondition } from '../services/quotes.js';
 import { fetchQuoteHistory, hasQuoteSheetConfig } from '../services/quoteSheet.js';
 
@@ -43,6 +45,7 @@ const resolveSynchronizedStatus = (status, approvalStatus, condition) => {
 
 export const useQuotes = () => {
   const [quotes, setQuotes] = useState([]);
+  const { clients, refresh: refreshClients } = useClients();
   const [syncInfo, setSyncInfo] = useState({ status: 'idle', lastSync: null, error: null });
 
   const buildKey = (quote) => (quote?.poNumber ? `po-${quote.poNumber}` : quote?.id || crypto.randomUUID());
@@ -57,6 +60,7 @@ export const useQuotes = () => {
     const merged = { ...remote, ...local };
     return {
       ...merged,
+      financialMetadata: remote?.financialMetadata || local?.financialMetadata,
       poNumber: local?.poNumber || remote?.poNumber,
       status: resolveSynchronizedStatus(
         remote?.status || local?.status,
@@ -90,6 +94,7 @@ export const useQuotes = () => {
       contactPhone: preferNonEmpty(local?.contactPhone, remote?.contactPhone) || '',
       contactEmail: preferNonEmpty(local?.contactEmail, remote?.contactEmail) || '',
       deliveryTime: preferNonEmpty(local?.deliveryTime, remote?.deliveryTime) || '',
+      teamExecutionDays: local?.teamExecutionDays ?? remote?.teamExecutionDays ?? '',
       paymentTerms: preferNonEmpty(local?.paymentTerms, remote?.paymentTerms) || '',
       discountValue: local?.discountValue ?? remote?.discountValue ?? 0,
       taxRate: local?.taxRate ?? remote?.taxRate ?? 0,
@@ -121,6 +126,7 @@ export const useQuotes = () => {
           return {
             id: details.id || `po-${h.poNumber || idx}-${h.clientName || ''}`,
             poNumber: details.poNumber || h.poNumber,
+            financialMetadata: h.financialMetadata,
             clientId: details.clientId || h.clientId || '',
             clientName: details.clientName || h.clientName || '',
             clientCompany: details.clientCompany || h.clientName || '',
@@ -148,6 +154,7 @@ export const useQuotes = () => {
             category: details.category || h.category || '',
             responsible: details.responsible || h.responsible || '',
             deliveryTime: details.deliveryTime || '',
+            teamExecutionDays: details.teamExecutionDays ?? '',
             paymentTerms: details.paymentTerms || '',
             discountValue: details.discountValue ?? 0,
             taxRate: details.taxRate ?? 0,
@@ -226,5 +233,12 @@ export const useQuotes = () => {
     await loadQuotes();
   };
 
-  return { quotes, syncInfo, addQuote, editQuote, editApproval, editCondition, cloneQuote, removeQuote, refreshQuotes: loadQuotes };
+  const refreshAllQuotes = async () => {
+    await refreshClients();
+    return loadQuotes();
+  };
+
+  const resolvedQuotes = useMemo(() => resolveQuoteClients(quotes, clients), [quotes, clients]);
+
+  return { quotes: resolvedQuotes, syncInfo, addQuote, editQuote, editApproval, editCondition, cloneQuote, removeQuote, refreshQuotes: refreshAllQuotes };
 };

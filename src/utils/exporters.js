@@ -1,3 +1,4 @@
+import { getQuotePresentationItems } from './quotePresentation.js';
 import { formatCurrency, formatDate } from './formatters.js';
 
 let xlsxPromise;
@@ -223,10 +224,6 @@ export const exportQuoteToPDF = async (quote, options = {}) => {
     doc.text(valueText, x + 6, y + 19);
   };
 
-  const isLaborItem = (item) =>
-    ['diaria-tecnico', 'diaria-fusao', 'acompanhamento'].includes(item.id) ||
-    ['DIARIA-TEC', 'DIARIA-FUSAO', 'ACOMPANHAMENTO'].includes(item.sku);
-
   const materialsTotal = (quote.items || [])
     .filter((i) => i.type === 'materiais')
     .reduce((acc, item) => acc + item.price * item.quantity, 0);
@@ -237,7 +234,7 @@ export const exportQuoteToPDF = async (quote, options = {}) => {
   const subtotal = hasItems ? materialsTotal + servicesTotal : toNumber(quote.subtotal ?? quote.total ?? 0);
   const taxRate = toNumber(quote.taxRate || 0);
   const discount = toNumber(quote.discountValue || 0);
-  const taxValue = subtotal * (taxRate / 100);
+  const taxValue = (subtotal - discount) * (taxRate / 100);
   const computedTotal = (subtotal - discount) * (1 + taxRate / 100);
   const grandTotal = hasItems ? computedTotal : toNumber(quote.total ?? 0) || computedTotal;
   const showItemValues = quote.showItemValues === true;
@@ -273,10 +270,9 @@ export const exportQuoteToPDF = async (quote, options = {}) => {
   doc.text('Itens do orçamento', margin, cardsY + 40);
 
   const itemTableHead = ['Item', 'Categoria', 'SKU', 'Tipo', 'Quantidade'];
-  if (showItemValues) itemTableHead.push('Valor unitário');
+  if (showItemValues) itemTableHead.push('Valor unit\u00e1rio', 'Valor total');
 
-  const itemTableBody = (quote.items || [])
-    .filter((item) => !isLaborItem(item))
+  const itemTableBody = getQuotePresentationItems(quote.items || [], showItemValues, quote.teamExecutionDays || quote.deliveryTime || 1)
     .map((item) => {
       const row = [
         item.name || '--',
@@ -285,7 +281,12 @@ export const exportQuoteToPDF = async (quote, options = {}) => {
         item.unit || '--',
         item.quantity,
       ];
-      if (showItemValues) row.push(formatCurrency(item.price));
+      if (showItemValues) {
+        const unitValue = item.presentationTotal !== undefined
+          ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 6 }).format(item.price)
+          : formatCurrency(item.price);
+        row.push(unitValue, formatCurrency(item.presentationTotal ?? (toNumber(item.price) * toNumber(item.quantity))));
+      }
       return row;
     });
 
@@ -299,12 +300,13 @@ export const exportQuoteToPDF = async (quote, options = {}) => {
     alternateRowStyles: { fillColor: [247, 249, 252] },
     columnStyles: showItemValues
       ? {
-          0: { cellWidth: contentWidth * 0.34 },
-          1: { cellWidth: contentWidth * 0.17 },
-          2: { cellWidth: contentWidth * 0.13 },
+          0: { cellWidth: contentWidth * 0.28 },
+          1: { cellWidth: contentWidth * 0.12 },
+          2: { cellWidth: contentWidth * 0.11 },
           3: { cellWidth: contentWidth * 0.09 },
-          4: { halign: 'right', cellWidth: contentWidth * 0.11 },
+          4: { halign: 'right', cellWidth: contentWidth * 0.08 },
           5: { halign: 'right', cellWidth: contentWidth * 0.16 },
+          6: { halign: 'right', cellWidth: contentWidth * 0.16 },
         }
       : {
           0: { cellWidth: contentWidth * 0.44 },

@@ -4,6 +4,7 @@ import { Suspense, lazy } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import QuotesTable from '../components/QuotesTable.jsx';
+import FinancialReportButton from '../components/FinancialReportButton.jsx';
 import { useQuotes } from '../hooks/useQuotes.js';
 import { useProducts } from '../hooks/useProducts.js';
 import ModalPortal from '../components/ModalPortal.jsx';
@@ -771,19 +772,17 @@ const Orcamentos = () => {
   const handleCancelDelete = () => setConfirmQuote(null);
 
   const refreshCatalog = () => {
-    materiais.refresh();
-    servicos.refresh();
+    return Promise.all([materiais.refresh(), servicos.refresh()]);
   };
 
   const handleReloadAll = async () => {
     setReloadingQuotes(true);
     try {
-      refreshCatalog();
-      await refreshQuotes();
+      await Promise.all([refreshCatalog(), refreshQuotes()]);
       await loadAudit(200);
       pushToast({
         title: 'Dados recarregados',
-        message: 'Planilhas, historico e lista de orcamentos foram atualizados.',
+        message: 'Clientes, materiais, serviços, histórico e orçamentos foram atualizados.',
         type: 'success',
       });
     } catch (error) {
@@ -952,8 +951,9 @@ const Orcamentos = () => {
         </div>
         <div className="flex flex-col items-start gap-2 lg:items-end">
         <div className="flex flex-wrap gap-2">
-            <button className="btn-secondary" onClick={handleReloadAll} title="Recarregar planilha" aria-label="Recarregar planilha">
+            <button className="btn-secondary" onClick={handleReloadAll} disabled={loadingCatalog || reloadingQuotes} title="Sincronizar clientes, catálogo e orçamentos" aria-label="Sincronizar dados">
               <RefreshCw className={`h-4 w-4 ${loadingCatalog || reloadingQuotes ? 'animate-spin' : ''}`} />
+              Sincronizar dados
             </button>
             <button
               className="btn-primary"
@@ -1042,6 +1042,7 @@ const Orcamentos = () => {
               <Suspense
                 fallback={<div className="h-8 w-[7.5rem] animate-pulse rounded-xl border border-white/10 bg-white/5" />}
               >
+                <FinancialReportButton syncing={syncInfo.status === 'loading'} />
                 <ExportButtons
                   onCSV={() => handleListExport('csv')}
                   onExcel={() => handleListExport('excel')}

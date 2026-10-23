@@ -24,6 +24,7 @@ const defaultQuote = {
   status: 'Enviado',
   validUntil: defaultValid(),
   deliveryTime: '5',
+  teamExecutionDays: '',
   paymentTerms: '30',
   category: '',
   poNumber: '',
@@ -329,6 +330,16 @@ const LABOR_OPTIONS = [
     rate: 600,
     unitLabel: 'dia',
     quantityLabel: 'Quantidade de dias',
+  },
+  {
+    key: 'gestao',
+    id: 'diaria-gestao',
+    label: 'Colaborador Clever - Projeto',
+    sku: 'DIARIA-GESTAO',
+    rate: 315,
+    unitLabel: 'dia',
+    quantityLabel: 'Quantidade de dias',
+    internalCost: true,
   },
   {
     key: 'acompanhamento',
@@ -1272,13 +1283,8 @@ const QuoteModal = ({
     updateCategoryScope(scopeTemplateCategory, DEFAULT_CATEGORY_SCOPES[scopeTemplateCategory] || '');
   };
 
-  const buildBreakdownText = (breakdown) => {
-    if (!breakdown) return '';
-    return `${formatCurrency(breakdown.diaria)} diaria + ${formatCurrency(breakdown.transporte)} VT + ${formatCurrency(breakdown.refeicao)} refeicao`;
-  };
-
   const openLaborModal = () => {
-    const nextForm = {};
+    const nextForm = { teamExecution: { quantity: String(form.teamExecutionDays || form.deliveryTime || 1) } };
     LABOR_OPTIONS.forEach((option) => {
       const existing = laborItemsById.get(option.id);
       nextForm[option.id] = {
@@ -1324,9 +1330,10 @@ const QuoteModal = ({
           quantity: qty,
           unit: option.unitLabel || '',
           type: 'servicos',
+          ...(option.internalCost ? { realCost: rate } : {}),
         });
       });
-      return { ...prev, items };
+      return { ...prev, items, teamExecutionDays: Math.max(1, Math.floor(Number(laborForm.teamExecution?.quantity) || 1)) };
     });
     closeLaborModal();
   };
@@ -1855,8 +1862,8 @@ const QuoteModal = ({
                     Exibir valores dos itens no orçamento
                   </span>
                   <span className="mt-0.5 block text-[10px] font-normal text-slate-400 sm:text-[11px]">
-                    Adiciona ao PDF uma coluna com o valor unitário de cada material e serviço.
-                  </span>
+                    Exibe valores unitários e totais, incluindo diárias, acompanhamento e gestão preenchidos.
+                    </span>
                 </span>
               </label>
               <label className="block text-xs font-semibold text-slate-300 sm:col-span-3 sm:text-sm">
@@ -2692,12 +2699,12 @@ const QuoteModal = ({
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-rose-300">Atenção crítica</p>
                 <h4 id="item-values-confirm-title" className="mt-1 text-base font-semibold text-white sm:text-lg">
-                  Exibir valores unitários na proposta?
+                  Exibir valores detalhados na proposta?
                 </h4>
               </div>
             </div>
             <p className="mt-4 text-xs leading-relaxed text-slate-200 sm:text-sm">
-              Ao confirmar, o valor unitário de cada material e serviço será exibido na proposta enviada ao cliente e no PDF. Deseja realmente ativar esta opção?
+              Ao confirmar, os valores unitários e totais dos itens, incluindo diárias, acompanhamento e gestão preenchidos, aparecem no PDF enviado ao cliente.
             </p>
             <div className="mt-5 flex justify-end gap-2">
               <button type="button" className="btn-secondary" onClick={() => setItemValuesConfirmOpen(false)}>
@@ -2771,7 +2778,7 @@ const QuoteModal = ({
       {laborModalOpen && (
         <div className={`cyber-overlay fixed inset-0 z-[60] flex items-center justify-center px-2 py-4 sm:px-3 sm:py-6 ${modalPalette.overlay}`}>
           <div
-            className={`cyber-dialog w-full max-w-md rounded-2xl border p-3 sm:p-4 ${modalPalette.surface} ${modalPalette.border} ${modalPalette.glow}`}
+            className={`cyber-dialog w-full max-w-3xl rounded-2xl border p-3 sm:p-4 ${modalPalette.surface} ${modalPalette.border} ${modalPalette.glow}`}
           >
             <div className="mb-2 flex items-center justify-between sm:mb-3">
               <h4 className="text-sm font-semibold text-white sm:text-base">Diarias</h4>
@@ -2783,23 +2790,20 @@ const QuoteModal = ({
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="mt-2 space-y-2 sm:mt-3 sm:space-y-3">
+            <div className="mt-2 grid grid-cols-2 items-end gap-2 sm:gap-3">
               {LABOR_OPTIONS.map((option) => {
                 const entry = laborForm[option.id] || {};
                 const quantity = entry.quantity ?? '';
                 const rate = entry.rate ?? option.rate;
-                const breakdownText = buildBreakdownText(option.breakdown);
-                const unitLabel = option.unitLabel ? `por ${option.unitLabel}` : 'por unidade';
+
+
 
                 return (
                   <div key={option.id} className="rounded-xl border border-white/10 bg-white/5 p-2.5 sm:p-3">
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="text-xs font-semibold text-white sm:text-sm">{option.label}</p>
-                        <p className="text-[11px] text-slate-400 sm:text-xs">
-                          {formatCurrency(option.rate)} {unitLabel}
-                          {breakdownText ? ` (${breakdownText})` : ''}
-                        </p>
+
                       </div>
                     </div>
                     <div className="mt-2 grid grid-cols-1 gap-2 sm:mt-3 sm:grid-cols-2">
@@ -2821,7 +2825,7 @@ const QuoteModal = ({
                           min="0"
                           step="0.01"
                           value={rate}
-                          onChange={(e) => updateLaborField(option.id, 'rate', e.target.value.replace(/[^0-9,]/g, ''))}
+                          onChange={(e) => updateLaborField(option.id, 'rate', e.target.value.replace(/[^0-9.,]/g, ''))}
                           className="mt-1 w-full rounded-xl border border-white/15 bg-slate-900 px-3 py-1.5 text-xs sm:py-2 sm:text-sm text-white outline-none focus:border-primary/60"
                           placeholder={String(option.rate)}
                         />
