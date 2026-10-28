@@ -7,7 +7,7 @@ export const resolveQuoteClients = (quotes, clients) => {
     return {
       ...quote,
       clientCompany: client.company || quote.clientCompany,
-      clientName: client.responsavel || client.name || quote.clientName,
+      clientName: quote.clientName || client.responsavel || client.name,
     };
   });
 };
