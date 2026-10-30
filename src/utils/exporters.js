@@ -598,7 +598,8 @@ export const exportQuoteToPDF = async (quote, options = {}) => {
     ['CNPJ:', '35.510.979/0001-22'],
     ['Endereço:', 'Rua Rua Clotilde Galea, 170 - Vila Osasco, São Paulo'],
     ['Telefone:', '11 4709-9523'],
-    ['Email:', 'contato@cleverconnection.com.br | www.cleverconnection.com.br'],
+    ['Email:', 'contato@cleverconnection.com.br'],
+    ['Site:', 'www.cleverconnection.com.br'],
   ].forEach(([label, value]) => {
     doc.setTextColor(...palette.muted);
     doc.text(label, leftXData, lineYData, { maxWidth: colWidthData - labelOffsetData });
@@ -612,7 +613,6 @@ export const exportQuoteToPDF = async (quote, options = {}) => {
     ['Banco:', '077 - Inter'],
     ['Agência:', '0001'],
     ['Conta:', '39885837-3'],
-    ['Site:', 'www.cleverconnection.com.br'],
   ].forEach(([label, value]) => {
     doc.setTextColor(...palette.muted);
     doc.text(label, rightXData, lineYData, { maxWidth: colWidthData - labelOffsetData });

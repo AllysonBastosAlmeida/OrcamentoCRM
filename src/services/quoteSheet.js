@@ -415,6 +415,7 @@ export const updateQuoteApprovalStatus = async (poNumber, approvalStatus) => {
     const poIdx = headerIndexByName(headers, "po");
     const approvalIdx = headerIndexByName(headers, "aprovacao");
     const statusIdx = headerIndexByName(headers, "status");
+    const paymentStatusIdx = headerIndexByName(headers, "situacao");
     const invoiceTriggerIdx = resolveInvoiceTriggerColumnIndex(headers);
     if (poIdx === -1 || approvalIdx === -1) return;
 
@@ -446,6 +447,7 @@ export const updateQuoteApprovalStatus = async (poNumber, approvalStatus) => {
       { columnIndex: approvalIdx, value: approvalStatus || "" },
       { columnIndex: statusIdx, value: synchronizedStatus || "" },
       { columnIndex: invoiceTriggerIdx, value: invoiceTriggerValue },
+      ...(normalizedApproval === "aprovado" ? [{ columnIndex: paymentStatusIdx, value: "Pendente" }] : []),
     ].filter((entry, index, array) => entry.columnIndex >= 0 && array.findIndex((item) => item.columnIndex === entry.columnIndex) === index);
 
     const doPatch = async (columnIndex, value, useFallback = false) => {
